@@ -22,6 +22,7 @@
 #include <HardwareTimer.h>
 #include <IWatchdog.h>
 #include <LzOS.h>
+#include <LzUi.h>
 #include <VL53L1X.h>
 #include <Wire.h>
 
@@ -40,6 +41,10 @@ static uint32_t tofLastOk[5] = {};
 static uint32_t lastImuMs = 0;
 static uint32_t lastExpanderMs = 0;
 static float accMag = 1.0f;
+// PCF8574 /INT (spec 1.2): the ISR only raises a flag — the actual I2C
+// read happens in the main loop (never I2C inside an interrupt).
+static volatile bool expanderIntFlag = false;
+static void expanderIntIsr() { expanderIntFlag = true; }
 
 // ---- motor command shared with the 200 Hz control ISR ----
 struct MotorCmd {
@@ -150,13 +155,19 @@ static void sensorsUpdate(uint32_t now) {
     }
     tofState[i].ok = (now - tofLastOk[i]) < 300 && tofState[i].mm > 0;
   }
-  // digital edge sensors via expander P5/P6, polled at 200 Hz (5 ms)
-  if (expanderOk && now - lastExpanderMs >= 5) {
+  // digital edge sensors via expander P5/P6: event-driven off /INT
+  // (reading the port also clears the PCF8574's interrupt), plus a slow
+  // 100 ms fallback read in case an INT edge was ever missed.
+  if (expanderOk && (expanderIntFlag || now - lastExpanderMs >= 100)) {
+    expanderIntFlag = false;
     lastExpanderMs = now;
     uint8_t v;
     if (expanderRead(v)) {
-      edgeL = (v & (1 << 5)) != 0;  // module output HIGH on white boundary
-      edgeR = (v & (1 << 6)) != 0;
+      bool rawL = (v & (1 << 5)) != 0;
+      bool rawR = (v & (1 << 6)) != 0;
+      // Edge Polarity setting (spec Edge Calibration): 0=Active-High
+      edgeL = G.cur.edgePolarity ? !rawL : rawL;
+      edgeR = G.cur.edgePolarity ? !rawR : rawR;
     }
   }
   imuUpdate(now);
@@ -225,6 +236,11 @@ void talonHwBegin() {
   encL.begin(PIN_ENC_L_A, PIN_ENC_L_B);
   encR.begin(PIN_ENC_R_A, PIN_ENC_R_B);
   tofInitAll();
+  // /INT is open-drain, active-low; a change on any expander input
+  // asserts it until we read the port back.
+  pinMode(PIN_EXPANDER_INT, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PIN_EXPANDER_INT), expanderIntIsr,
+                  FALLING);
   imuInit();
   ctlTimer.setOverflow(200, HERTZ_FORMAT);
   ctlTimer.attachInterrupt(controlIsr);
@@ -313,6 +329,14 @@ void runStart() {  // initial arm AND Quick Rematch: full state reset
   Strategy &s = activeStrategy();
   if (!s.used || s.phaseCount == 0) {
     Buzzer.play(SND_ERROR);
+    return;
+  }
+  // Safety interlock (spec 2.1): never arm blind to the boundary — if the
+  // edge sensors show FAIL in Sensor Health, refuse with an explanation.
+  if (!expanderOk) {
+    Buzzer.play(SND_ERROR);
+    Leds.red(LZLED_BLINK_FAST);
+    Message.show("Cannot arm: edge", "sensors FAIL. Fix!");
     return;
   }
   rs = RS_COUNTDOWN;

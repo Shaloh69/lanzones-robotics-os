@@ -274,11 +274,20 @@ static void openEdgeCheck() { OS.push(&edgeCheck); }
 static void openTofZero() {
   if (OS.editAllowed()) OS.push(&tofZero);
 }
+// Edge Polarity (spec Edge Calibration): matches the module's output sense.
+static const char *const EDGE_POL_NAMES[2] = {"Active-High", "Active-Low"};
+static void editEdgePolarity() {
+  EnumEditor.open("Edge polarity", EDGE_POL_NAMES, 2, &G.cur.edgePolarity);
+}
+static void vEdgePol(char *o, size_t n) {
+  snprintf(o, n, "%s", G.cur.edgePolarity ? "Act-LO" : "Act-HI");
+}
 static const LzMenuItem CAL_ITEMS[] = {
     {"Edge Sensor Check", openEdgeCheck, nullptr},
+    {"Edge Polarity", editEdgePolarity, vEdgePol},
     {"ToF Zero Reference", openTofZero, nullptr},
 };
-static LzMenuScreen calMenu("CALIB", CAL_ITEMS, 2);
+static LzMenuScreen calMenu("CALIB", CAL_ITEMS, 3);
 void openCalibrate() { OS.push(&calMenu); }
 
 // ---------------- MOTOR TEST ----------------

@@ -19,6 +19,9 @@ static const uint8_t PIN_MOTOR_R_DIR = PB5;   // PLACEHOLDER (H-bridge mode)
 
 // I2C GPIO expander (spec 1.2): XSHUT x5 on P0-P4, edge digital on P5/P6
 #define TALON_EXPANDER_ADDR 0x20  // PLACEHOLDER — PCF8574 A2A1A0 = 000
+// PCF8574 /INT output -> dedicated GPIO (spec 1.2, REQUIRED): edge changes
+// wake an EXTI handler instead of 5 ms polling.
+static const uint8_t PIN_EXPANDER_INT = PB1;  // PLACEHOLDER — EXTI1
 
 // Optional quadrature encoders (spec 2.3) — interrupt-capable pins
 static const uint8_t PIN_ENC_L_A = PB3;   // PLACEHOLDER

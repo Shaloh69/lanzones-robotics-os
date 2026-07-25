@@ -106,6 +106,9 @@ struct TalonTuning {
   uint8_t tractionEnable = 0;
   int16_t slipSense = 5;         // mismatch threshold (higher = less touchy)
   uint8_t slipResponse = 1;      // 0=Reduce Power, 1=Alert Only, 2=Retreat
+  // Edge module polarity (spec: Edge Calibration): 0 = Active-High
+  // (module output HIGH on the white boundary), 1 = Active-Low.
+  uint8_t edgePolarity = 0;
 };
 
 #define TALON_MAX_PROFILES 5
@@ -122,7 +125,7 @@ struct TalonStore {
   TalonProfile profiles[TALON_MAX_PROFILES];
   Strategy strategies[TALON_MAX_STRATEGIES];
 };
-#define TALON_STORE_VERSION 2  // v2: addendum fields; v1 images load as defaults
+#define TALON_STORE_VERSION 3  // v3: edge polarity; older images load as defaults
 
 extern TalonStore G;
 
