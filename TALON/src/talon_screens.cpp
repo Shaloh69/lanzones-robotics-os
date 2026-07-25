@@ -1,9 +1,8 @@
 // Copyright (c) 2026 Team Lanzones. Partnered by Koogs Robotics. All rights reserved.
 //
-// TALON screens: RUN MODE (countdown + live status), SENSOR HEALTH,
-// CALIBRATE (edge wizard + ToF zero), MOTOR TEST, ORIENTATION (IMU).
-// All live screens redraw change-driven: values are quantized and compared,
-// and the display is only marked dirty when something actually changed.
+// TALON screens: RUN MODE (countdown + live status + match timer +
+// post-match Quick Rematch), SENSOR HEALTH, CALIBRATE (edge check + ToF
+// zero), MOTOR TEST, ORIENTATION. Live screens redraw change-driven.
 #include <LzOS.h>
 #include <LzUi.h>
 
@@ -16,31 +15,33 @@ class RunScreen : public LzScreen {
   RunScreen() : LzScreen("RUN") {}
   void onEnter() override { snap_ = 0xFFFFFFFF; }
   void onLeave() override {
-    if (runState() != RS_IDLE) runAbort("EXIT");
+    if (runState() == RS_COUNTDOWN || runState() == RS_RUNNING)
+      runAbort("EXIT");
   }
   bool onEvent(const LzEvent &ev) override {
     if (ev.btn == BTN_START && ev.type == EV_PRESS) {
-      if (runState() == RS_IDLE)
-        runStart();
+      if (runState() == RS_IDLE || runState() == RS_POSTMATCH)
+        runStart();  // arm — from post-match this IS Quick Rematch (spec 2.1)
       else
-        runAbort("STOP BTN");  // aborts back to menu instantly (spec 2.1)
+        runAbort("STOP BTN");
       return true;
     }
-    if (ev.btn == BTN_BACK && ev.type == EV_PRESS && runState() != RS_IDLE) {
+    if (ev.btn == BTN_BACK && ev.type == EV_PRESS &&
+        (runState() == RS_COUNTDOWN || runState() == RS_RUNNING)) {
       runAbort("STOP BTN");
-      return true;  // first BACK stops; second BACK leaves
+      return true;
     }
     return false;
   }
   void onTick(uint32_t now) override {
     (void)now;
-    // quantized live values -> change-driven redraw (spec 6.1)
     int d = opponentDistMm();
     uint32_t s = ((uint32_t)runState() << 28) ^ ((uint32_t)runPhaseIdx() << 24) ^
                  ((uint32_t)(d < 0 ? 0xFFF : d / 10) << 8) ^
                  ((edgeL ? 2 : 0) | (edgeR ? 1 : 0)) ^
                  ((runCountdownMs() / 100) << 16) ^
-                 ((runElapsedMs() / 200) << 4);
+                 ((runMatchRemainingMs() / 1000) << 4) ^
+                 ((uint32_t)tractionSlipActive() << 27);
     if (s != snap_) {
       snap_ = s;
       OS.requestRedraw();
@@ -58,16 +59,18 @@ class RunScreen : public LzScreen {
     }
     if (runState() == RS_RUNNING) {
       Strategy &st = G.strategies[G.cur.activeStrategy];
+      uint32_t rem = runMatchRemainingMs() / 1000;
       int d = opponentDistMm();
       if (d >= 0)
-        snprintf(b, sizeof(b), "Opp: %dmm  T:%lus", d,
-                 (unsigned long)(runElapsedMs() / 1000));
+        snprintf(b, sizeof(b), "Opp:%4dmm  %lu:%02lu", d,
+                 (unsigned long)(rem / 60), (unsigned long)(rem % 60));
       else
-        snprintf(b, sizeof(b), "Opp: ---   T:%lus",
-                 (unsigned long)(runElapsedMs() / 1000));
+        snprintf(b, sizeof(b), "Opp: ---    %lu:%02lu",
+                 (unsigned long)(rem / 60), (unsigned long)(rem % 60));
       Display.bodyRow(0, b, false);
-      snprintf(b, sizeof(b), "Edge: %s %s", edgeL ? "L!" : "L-",
-               edgeR ? "R!" : "R-");
+      snprintf(b, sizeof(b), "Edge:%s %s %s%s", edgeL ? "L!" : "L-",
+               edgeR ? "R!" : "R-", runBoosted() ? "BOOST " : "",
+               tractionSlipActive() ? "SLIP!" : "");
       Display.bodyRow(1, b, false);
       snprintf(b, sizeof(b), "Act: %s", runActionName());
       Display.bodyRow(2, b, false);
@@ -76,19 +79,33 @@ class RunScreen : public LzScreen {
       Display.bodyRow(3, b, false);
       return;
     }
+    if (runState() == RS_POSTMATCH) {  // post-match: Quick Rematch (spec 2.1)
+      Display.bodyRow(0, "== MATCH OVER ==", false);
+      snprintf(b, sizeof(b), "Result: %s", runStopReason());
+      Display.bodyRow(1, b, false);
+      Display.bodyRow(2, "START: Quick", false);
+      Display.bodyRow(3, "Rematch  BK: exit", false);
+      return;
+    }
     // idle
     Strategy &st = G.strategies[G.cur.activeStrategy];
     snprintf(b, sizeof(b), "Strategy: %s", st.used ? st.name : "NONE!");
     Display.bodyRow(0, b, false);
-    Display.bodyRow(1, "Press START/STOP", false);
-    Display.bodyRow(2, "for 5s countdown", false);
+    snprintf(b, sizeof(b), "Match len: %d:%02d", st.matchDurS / 60,
+             st.matchDurS % 60);
+    Display.bodyRow(1, b, false);
+    Display.bodyRow(2, "START: arm (5s)", false);
     if (runStopReason()[0]) {
       snprintf(b, sizeof(b), "Last: %s", runStopReason());
       Display.bodyRow(3, b, false);
     }
   }
   const char *hint() override {
-    return runState() == RS_IDLE ? "ST:Start BK:Back" : "ST/BK:ABORT";
+    switch (runState()) {
+      case RS_IDLE: return "ST:Start BK:Back";
+      case RS_POSTMATCH: return "ST:Rematch BK:Exit";
+      default: return "ST/BK:ABORT";
+    }
   }
 
  private:
@@ -105,32 +122,34 @@ class SensorHealthScreen : public LzScreen {
   bool onEvent(const LzEvent &ev) override {
     if (ev.type != EV_PRESS && ev.type != EV_REPEAT) return false;
     if (ev.btn == BTN_UP && top_ > 0) top_--;
-    else if (ev.btn == BTN_DOWN && top_ < 3) top_++;  // 7 rows, window 4
+    else if (ev.btn == BTN_DOWN && top_ < 3) top_++;
     else return false;
     return true;
   }
   void onTick(uint32_t now) override {
-    if (now - last_ >= 200) {  // 5 Hz live refresh, change-driven enough
+    if (now - last_ >= 200) {
       last_ = now;
       OS.requestRedraw();
     }
   }
   void draw(U8G2 &g) override {
     (void)g;
+    static const char *const TOF_NAMES[5] = {"WdL", "AnL", "Frt", "AnR", "WdR"};
     char b[26];
     for (uint8_t r = 0; r < 4; r++) {
       uint8_t i = (uint8_t)(top_ + r);
       if (i < 5) {
         if (tofState[i].ok)
-          snprintf(b, sizeof(b), "ToF%d %4dmm PASS", i + 1, tofState[i].mm);
+          snprintf(b, sizeof(b), "ToF %s %4dmm PASS", TOF_NAMES[i],
+                   tofState[i].mm);
         else
-          snprintf(b, sizeof(b), "ToF%d  ---   FAIL", i + 1);
+          snprintf(b, sizeof(b), "ToF %s  ---  FAIL", TOF_NAMES[i]);
       } else if (i == 5) {
-        snprintf(b, sizeof(b), "EdgeL %4d %s", edgeValL,
-                 edgeValL > 0 ? "PASS" : "FAIL");
+        snprintf(b, sizeof(b), "EdgeL %s %s", edgeL ? "TRIP " : "clear",
+                 expanderOk ? "PASS" : "FAIL");
       } else {
-        snprintf(b, sizeof(b), "EdgeR %4d %s", edgeValR,
-                 edgeValR > 0 ? "PASS" : "FAIL");
+        snprintf(b, sizeof(b), "EdgeR %s %s", edgeR ? "TRIP " : "clear",
+                 expanderOk ? "PASS" : "FAIL");
       }
       Display.bodyRow(r, b, false);
     }
@@ -144,30 +163,30 @@ class SensorHealthScreen : public LzScreen {
 static SensorHealthScreen sensorHealth;
 void openSensorHealth() { OS.push(&sensorHealth); }
 
-// ---------------- CALIBRATE: Edge Threshold Wizard (3 steps) ------------
-class EdgeWizardScreen : public LzScreen {
+// ---------------- CALIBRATE: Edge sensor check (digital modules) ---------
+// Edge sensors are digital (expander P5/P6) per updated spec 1.2 — the
+// threshold lives in each module's onboard pot, so the old analog capture
+// wizard becomes a guided VERIFICATION: white must TRIP, dark must CLEAR.
+class EdgeCheckScreen : public LzScreen {
  public:
-  EdgeWizardScreen() : LzScreen("EDGE-CAL") {}
-  void onEnter() override { step_ = 0; }
+  EdgeCheckScreen() : LzScreen("EDGE-CAL") {}
+  void onEnter() override { step_ = 0; okWhite_ = okDark_ = false; }
   bool onEvent(const LzEvent &ev) override {
     if (ev.btn != BTN_SELECT || ev.type != EV_PRESS) return false;
-    int16_t avg = (int16_t)(((int32_t)edgeValL + edgeValR) / 2);
     if (step_ == 0) {
-      white_ = avg;
+      okWhite_ = edgeL && edgeR;  // both must see the white boundary
       step_ = 1;
     } else if (step_ == 1) {
-      dark_ = avg;
-      computed_ = (int16_t)(((int32_t)white_ + dark_) / 2);
+      okDark_ = !edgeL && !edgeR;  // both must clear on dark clay
       step_ = 2;
+      Buzzer.play((okWhite_ && okDark_) ? SND_CONFIRM : SND_ERROR);
     } else {
-      G.cur.edgeThreshold = computed_;  // apply + persist (explicit save)
-      talonSaveWithFeedback();
       step_ = 0;
     }
     return true;
   }
   void onTick(uint32_t now) override {
-    if (now - last_ >= 200) {
+    if (now - last_ >= 150) {
       last_ = now;
       OS.requestRedraw();
     }
@@ -175,35 +194,37 @@ class EdgeWizardScreen : public LzScreen {
   void draw(U8G2 &g) override {
     (void)g;
     char b[26];
-    snprintf(b, sizeof(b), "Live: L%4d R%4d", edgeValL, edgeValR);
+    snprintf(b, sizeof(b), "Live: L=%s R=%s", edgeL ? "TRIP" : "clr",
+             edgeR ? "TRIP" : "clr");
     if (step_ == 0) {
-      Display.bodyRow(0, "1/3 Place sensors", false);
-      Display.bodyRow(1, "on WHITE line", false);
+      Display.bodyRow(0, "1/3 Sensors on", false);
+      Display.bodyRow(1, "WHITE line...", false);
       Display.bodyRow(2, b, false);
-      Display.bodyRow(3, "SELECT: capture", false);
+      Display.bodyRow(3, "SELECT: check", false);
     } else if (step_ == 1) {
-      Display.bodyRow(0, "2/3 Place sensors", false);
-      Display.bodyRow(1, "on DARK surface", false);
+      Display.bodyRow(0, "2/3 Sensors on", false);
+      Display.bodyRow(1, "DARK surface...", false);
       Display.bodyRow(2, b, false);
-      Display.bodyRow(3, "SELECT: capture", false);
+      Display.bodyRow(3, "SELECT: check", false);
     } else {
-      char c[26];
-      snprintf(c, sizeof(c), "W:%d D:%d", white_, dark_);
-      Display.bodyRow(0, "3/3 Auto-computed", false);
-      Display.bodyRow(1, c, false);
-      snprintf(c, sizeof(c), "Threshold = %d", computed_);
-      Display.bodyRow(2, c, false);
-      Display.bodyRow(3, "SELECT: save", false);
+      snprintf(b, sizeof(b), "White:%s Dark:%s", okWhite_ ? "PASS" : "FAIL",
+               okDark_ ? "PASS" : "FAIL");
+      Display.bodyRow(0, "3/3 Result", false);
+      Display.bodyRow(1, b, false);
+      Display.bodyRow(2, okWhite_ && okDark_ ? "Edge sensors OK"
+                                             : "Adjust module pot!",
+                      false);
+      Display.bodyRow(3, "SELECT: redo", false);
     }
   }
-  const char *hint() override { return "SEL:Capture BK:Cancel"; }
+  const char *hint() override { return "SEL:Step BK:Back"; }
 
  private:
   uint8_t step_ = 0;
-  int16_t white_ = 0, dark_ = 0, computed_ = 0;
+  bool okWhite_ = false, okDark_ = false;
   uint32_t last_ = 0;
 };
-static EdgeWizardScreen edgeWizard;
+static EdgeCheckScreen edgeCheck;
 
 // ---------------- CALIBRATE: ToF zero reference ----------------
 class TofZeroScreen : public LzScreen {
@@ -211,13 +232,13 @@ class TofZeroScreen : public LzScreen {
   TofZeroScreen() : LzScreen("TOF-CAL") {}
   bool onEvent(const LzEvent &ev) override {
     if (ev.btn == BTN_SELECT && ev.type == EV_PRESS) {
-      if (tofState[2].ok) {  // center sensor against a 100 mm target
+      if (tofState[2].ok) {  // front sensor against a 100 mm target
         int16_t raw = (int16_t)(tofState[2].mm - G.cur.tofZeroOffsetMm);
         G.cur.tofZeroOffsetMm = (int16_t)(100 - raw);
         talonSaveWithFeedback();
       } else {
         Buzzer.play(SND_ERROR);
-        Message.show("Center ToF FAIL", "Check wiring first");
+        Message.show("Front ToF FAIL", "Check wiring first");
       }
       return true;
     }
@@ -235,9 +256,9 @@ class TofZeroScreen : public LzScreen {
     Display.bodyRow(0, "Target at 100mm,", false);
     Display.bodyRow(1, "then SELECT.", false);
     if (tofState[2].ok)
-      snprintf(b, sizeof(b), "Center: %dmm", tofState[2].mm);
+      snprintf(b, sizeof(b), "Front: %dmm", tofState[2].mm);
     else
-      snprintf(b, sizeof(b), "Center: FAIL");
+      snprintf(b, sizeof(b), "Front: FAIL");
     Display.bodyRow(2, b, false);
     snprintf(b, sizeof(b), "Offset: %+dmm", G.cur.tofZeroOffsetMm);
     Display.bodyRow(3, b, false);
@@ -249,20 +270,18 @@ class TofZeroScreen : public LzScreen {
 };
 static TofZeroScreen tofZero;
 
-static void openEdgeWizard() {
-  if (OS.editAllowed()) OS.push(&edgeWizard);
-}
+static void openEdgeCheck() { OS.push(&edgeCheck); }
 static void openTofZero() {
   if (OS.editAllowed()) OS.push(&tofZero);
 }
 static const LzMenuItem CAL_ITEMS[] = {
-    {"Edge Threshold Wiz", openEdgeWizard, nullptr},
+    {"Edge Sensor Check", openEdgeCheck, nullptr},
     {"ToF Zero Reference", openTofZero, nullptr},
 };
 static LzMenuScreen calMenu("CALIB", CAL_ITEMS, 2);
 void openCalibrate() { OS.push(&calMenu); }
 
-// ---------------- MOTOR TEST (jog, spec 2.1) ----------------
+// ---------------- MOTOR TEST ----------------
 class MotorTestScreen : public LzScreen {
  public:
   MotorTestScreen() : LzScreen("MTEST") {}
@@ -272,13 +291,13 @@ class MotorTestScreen : public LzScreen {
       sel_ = (uint8_t)((sel_ + (ev.btn == BTN_DOWN ? 1 : 2)) % 3);
       return true;
     }
-    if (ev.btn == BTN_SELECT && ev.type == EV_PRESS) {  // cycle value
+    if (ev.btn == BTN_SELECT && ev.type == EV_PRESS) {
       if (sel_ == 0) motor_ ^= 1;
       else if (sel_ == 1) rev_ ^= 1;
-      else speed_ = (uint8_t)(speed_ % 4 + 1);  // 25/50/75/100
+      else speed_ = (uint8_t)(speed_ % 4 + 1);
       return true;
     }
-    if (ev.btn == BTN_START) {  // press = jog, release = stop
+    if (ev.btn == BTN_START) {
       if (ev.type == EV_PRESS) {
         int16_t p = (int16_t)(speed_ * 25) * (rev_ ? -1 : 1);
         talonMotorsTestPulse(motor_ == 0 ? p : 0, motor_ == 1 ? p : 0, 30000);
@@ -309,7 +328,7 @@ class MotorTestScreen : public LzScreen {
 static MotorTestScreen motorTest;
 void openMotorTest() { OS.push(&motorTest); }
 
-// ---------------- ORIENTATION (IMU, spec 2.1) ----------------
+// ---------------- ORIENTATION (IMU) ----------------
 static void editTilt() {
   NumEditor.openI("Tilt limit", &G.cur.tiltLimitDeg, 20, 90, 5, " deg");
 }
@@ -328,7 +347,7 @@ class OrientationScreen : public LzScreen {
     if (ev.btn == BTN_SELECT && ev.type == EV_PRESS) {
       if (sel_ == 0) {
         if (OS.editAllowed()) {
-          G.cur.autoStopFlip ^= 1;  // toggle
+          G.cur.autoStopFlip ^= 1;
           Buzzer.play(SND_CONFIRM);
         }
       } else if (sel_ == 1) {

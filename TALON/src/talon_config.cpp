@@ -68,6 +68,33 @@ static const LzMenuItem MOTORCFG_ITEMS[] = {
 static LzMenuScreen motorCfgMenu("MOTORS", MOTORCFG_ITEMS, 2, "SEL:Edit BK:Back");
 static void openMotorCfg() { OS.push(&motorCfgMenu); }
 
+// ---------------- Traction Control (addendum 1.1) ----------------
+static const char *const TRAC_MODES[] = {"Disabled", "Enabled"};
+static void editTracEnable() {
+  EnumEditor.open("Traction control", TRAC_MODES, 2, &G.cur.tractionEnable);
+}
+static void editSlipSense() {
+  NumEditor.openI("Slip sensitivity", &G.cur.slipSense, 1, 20, 1);
+}
+static void editSlipResp() {
+  EnumEditor.open("Response on slip", SLIP_RESP_NAMES, 3, &G.cur.slipResponse);
+}
+static void vTracEnable(char *o, size_t n) {
+  snprintf(o, n, "%s", G.cur.tractionEnable ? "ON" : "OFF");
+}
+static void vSlipSense(char *o, size_t n) { snprintf(o, n, "%d", G.cur.slipSense); }
+static void vSlipResp(char *o, size_t n) {
+  snprintf(o, n, "%s", SLIP_RESP_NAMES[G.cur.slipResponse < 3 ? G.cur.slipResponse : 1]);
+}
+
+static const LzMenuItem TRAC_ITEMS[] = {
+    {"Enable", editTracEnable, vTracEnable},
+    {"Slip sensitivity", editSlipSense, vSlipSense},
+    {"Response on slip", editSlipResp, vSlipResp},
+};
+static LzMenuScreen tracMenu("TRACTION", TRAC_ITEMS, 3, "SEL:Edit BK:Back");
+static void openTraction() { OS.push(&tracMenu); }
+
 // ---------------- Profiles (Save As / Load / Delete) ----------------
 static uint8_t profCount() {
   uint8_t n = 0;
@@ -134,6 +161,7 @@ static void saveAll() { talonSaveWithFeedback(); }
 static const LzMenuItem CFG_ITEMS[] = {
     {"PID Tuning", openPid, nullptr},
     {"Speed Limits", openSpeed, nullptr},
+    {"Traction Control", openTraction, nullptr},
     {"Motor Config", openMotorCfg, nullptr},
     {"Strategy Builder", openStrategyBuilder, nullptr},
     {"Profiles", openProfiles, nullptr},

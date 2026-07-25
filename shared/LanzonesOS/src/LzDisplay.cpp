@@ -81,6 +81,23 @@ bool LzDisplay::render(uint32_t now, LzScreen *top, const char *breadcrumb,
   u8g2_.setFont(u8g2_font_5x7_tr);
   u8g2_.drawStr(0, 63, top->hint());
 
-  u8g2_.sendBuffer();
+  flushChangedTiles();  // partial/dirty-region transfer (spec 6.1)
   return true;
+}
+
+void LzDisplay::flushChangedTiles() {
+  uint8_t *buf = u8g2_.getBufferPtr();
+  if (!prevValid_) {  // first frame: full send
+    u8g2_.sendBuffer();
+    memcpy(prev_, buf, sizeof(prev_));
+    prevValid_ = true;
+    return;
+  }
+  // 8 tile rows of 128 bytes each; send only rows whose pixels changed.
+  for (uint8_t t = 0; t < 8; t++) {
+    if (memcmp(buf + t * 128, prev_ + t * 128, 128) != 0) {
+      u8g2_.updateDisplayArea(0, t, 16, 1);
+      memcpy(prev_ + t * 128, buf + t * 128, 128);
+    }
+  }
 }

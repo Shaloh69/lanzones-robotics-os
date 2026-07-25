@@ -29,7 +29,12 @@ class LzDisplay {
   void fullScreenText(const char *l1, const char *l2, const char *l3, const char *l4);
 
  private:
+  void flushChangedTiles();
   U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2_{U8G2_R0, U8X8_PIN_NONE};
   bool dirty_ = true;
   uint32_t lastDraw_ = 0;
+  // previous frame copy for dirty-region transfer (spec 6.1): only tile
+  // rows that actually changed are sent over I2C, not the full frame.
+  uint8_t prev_[1024];
+  bool prevValid_ = false;
 };

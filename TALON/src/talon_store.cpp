@@ -11,9 +11,18 @@ const char *const PHASE_TYPE_NAMES[PH_TYPE_COUNT] = {
     "S:Spin", "S:Sweep", "S:Charge",
     "A:Ram", "A:Curve", "A:SideSlam",
     "R:Bk+Turn", "R:Backup", "R:Center",
+    "S:Crawl", "AngledTurn",
 };
 const char *const PHASE_TRIG_NAMES[TR_COUNT] = {"Time", "Opponent", "Edge"};
 const char *const RETREAT_NAMES[3] = {"Bk+Turn", "Backup", "Center"};
+const char *const RESUME_NAMES[3] = {"Restart", "NextPhase", "ToSearch"};
+const char *const SLIP_RESP_NAMES[3] = {"ReducePwr", "AlertOnly", "Retreat"};
+const char *const IGN_SENSOR_NAMES[7] = {
+    "Front ToF", "Angled-L ToF", "Angled-R ToF",
+    "Wide-L ToF", "Wide-R ToF", "Edge-L", "Edge-R"};
+// ToF array index (0=Wide-L,1=Angled-L,2=Front,3=Angled-R,4=Wide-R) -> bit
+const uint8_t TOF_IGN_BIT[5] = {IGN_TOF_WL, IGN_TOF_AL, IGN_TOF_FRONT,
+                                IGN_TOF_AR, IGN_TOF_WR};
 
 void talonDefaults() {
   G = TalonStore();

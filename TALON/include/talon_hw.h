@@ -1,50 +1,54 @@
 // Copyright (c) 2026 Team Lanzones. Partnered by Koogs Robotics. All rights reserved.
 //
-// TALON hardware layer: motors, 5x VL53L1X ToF, 2x edge sensors, IMU
-// (MPU6050-class on the shared I2C bus), and the RUN MODE engine.
-// All sensor reads are non-blocking with timeouts (spec 6.1) — a dead
-// sensor shows FAIL in Sensor Health and never stalls the loop.
+// TALON hardware layer: motors, 5x VL53L1X ToF (XSHUT via PCF8574 I2C
+// expander, spec 1.2), 2x digital edge sensors (expander inputs), IMU,
+// and the RUN MODE engine (spec 2.1 + advanced motion control addendum).
 #pragma once
 #include <Arduino.h>
 #include <LzMotor.h>
 
 extern LzMotor motorL, motorR;
+extern LzEncoder encL, encR;
 
 // ---------------- sensors ----------------
 struct TofState {
   uint16_t mm = 0;
-  bool present = false;  // initialized OK at boot
-  bool ok = false;       // fresh valid reading this cycle (PASS/FAIL)
+  bool present = false;
+  bool ok = false;
 };
+// index: 0=Wide-L, 1=Angled-L, 2=Front, 3=Angled-R, 4=Wide-R
 extern TofState tofState[5];
-extern int16_t edgeValL, edgeValR;  // raw reflectance
-extern bool edgeL, edgeR;           // over-threshold (white boundary)
+extern bool edgeL, edgeR;        // digital edge state (expander P5/P6)
+extern bool expanderOk;          // PCF8574 responded at boot
 
 struct ImuState {
   bool present = false;
   float tiltDeg = 0;
   bool flipped = false;
-  bool impact = false;  // latched push/impact spike; cleared by engine
+  bool impact = false;
 };
 extern ImuState imu;
 
-int opponentDistMm();  // min valid ToF distance, -1 if none
-int opponentDirIdx();  // 0..4 = sensor index of nearest, 2 = straight ahead
+int opponentDistMm();            // unmasked (motion/aiming)
+int opponentDirIdx();
 
 // ---------------- lifecycle ----------------
-void talonHwBegin();             // motors + sensors + IMU + control timer
+void talonHwBegin();
 void talonMotorsReinit();
-void talonHwTick(uint32_t now);  // non-blocking; call every loop
+void talonHwTick(uint32_t now);
 void talonMotorsTestPulse(int16_t pctL, int16_t pctR, uint16_t ms);
 void talonMotorsStop();
 
-// ---------------- RUN MODE engine (spec 2.1) ----------------
-enum RunState : uint8_t { RS_IDLE, RS_COUNTDOWN, RS_RUNNING };
+// ---------------- RUN MODE engine ----------------
+enum RunState : uint8_t { RS_IDLE, RS_COUNTDOWN, RS_RUNNING, RS_POSTMATCH };
 RunState runState();
 uint8_t runPhaseIdx();
-const char *runActionName();   // current action label for the live screen
-uint16_t runCountdownMs();     // remaining, while RS_COUNTDOWN
+const char *runActionName();
+uint16_t runCountdownMs();
 uint32_t runElapsedMs();
-const char *runStopReason();   // why the last run ended ("" if none)
-void runStart();               // begins the 5 s competition countdown
-void runAbort(const char *reason);  // instant stop (START/STOP button)
+uint32_t runMatchRemainingMs();  // match timer countdown (addendum 1.8)
+bool runBoosted();               // aggression boost fired
+bool tractionSlipActive();       // traction control slip flag (addendum 1.1)
+const char *runStopReason();
+void runStart();                 // also serves Quick Rematch from post-match
+void runAbort(const char *reason);

@@ -1,71 +1,107 @@
 // Copyright (c) 2026 Team Lanzones. Partnered by Koogs Robotics. All rights reserved.
 //
-// TALON hardware + RUN MODE engine.
+// TALON hardware + RUN MODE engine (spec 2.x + advanced motion addendum).
 //
 // Real-time structure (spec 6.1):
 //  - Sensor reads happen in talonHwTick() (main loop), non-blocking with
-//    freshness timeouts; results land in a volatile snapshot.
-//  - A 200 Hz hardware-timer ISR (TIM5) computes steering PID from the
-//    latest snapshot and writes the motor PWMs — menu activity can never
-//    starve motor control.
-//  - Shared ISR/main data uses volatile + brief critical sections (6.2).
+//    short timeouts (VL53L1X timeout 15 ms per updated spec 6.1).
+//  - A 200 Hz TIM5 ISR computes steering PID from a volatile snapshot and
+//    writes motor PWM; multi-field updates use brief critical sections.
+//  - Edge sensors are DIGITAL inputs on the PCF8574 expander (updated spec
+//    1.2), polled at 200 Hz on the shared I2C bus.
+//
+// Engine semantics decided with the team (2026-07-26):
+//  - Edge Escape is the strategy-level edge interrupt; a phase whose OWN
+//    trigger is Until-edge-detected keeps its trigger (advances normally)
+//    and escape covers every other phase.
+//  - Sensor Ignore Window filters TRIGGER evaluation only (opponent/edge
+//    detection, give-up progress) — motion/aiming and Sensor Health always
+//    use raw readings; time triggers unaffected (addendum 1.6).
 #include "talon_hw.h"
 
 #include <HardwareTimer.h>
-#include <VL53L1X.h>
-#include <Wire.h>
 #include <IWatchdog.h>
 #include <LzOS.h>
+#include <VL53L1X.h>
+#include <Wire.h>
 
 #include "pin_config.h"
 #include "talon_model.h"
 
 LzMotor motorL, motorR;
+LzEncoder encL, encR;
 TofState tofState[5];
-int16_t edgeValL = 0, edgeValR = 0;
 bool edgeL = false, edgeR = false;
+bool expanderOk = false;
 ImuState imu;
 
 static VL53L1X tof[5];
 static uint32_t tofLastOk[5] = {};
 static uint32_t lastImuMs = 0;
+static uint32_t lastExpanderMs = 0;
 static float accMag = 1.0f;
 
 // ---- motor command shared with the 200 Hz control ISR ----
 struct MotorCmd {
-  volatile int16_t l = 0, r = 0;      // open-loop percentages
-  volatile bool steerPid = false;     // steer toward opponent using PID
-  volatile int16_t base = 0;          // base speed for PID steering
-  volatile int8_t dirIdx = 2;         // latest opponent direction (0..4)
-  volatile bool valid = false;        // opponent currently seen
+  volatile int16_t l = 0, r = 0;
+  volatile bool steerPid = false;
+  volatile int16_t base = 0;
+  volatile int8_t dirIdx = 2;
+  volatile bool valid = false;
+  volatile uint8_t slipScalePct = 100;  // traction "Reduce Power" response
 };
 static MotorCmd cmd;
 static HardwareTimer ctlTimer(TIM5);
 
-// pulse (motor test / PID test-drive)
 static uint32_t pulseEnd = 0;
 static bool pulsing = false;
 
+// ---------------- PCF8574 expander (XSHUT P0-P4, edges P5/P6) ------------
+static uint8_t expanderShadow = 0xFF;  // quasi-bidirectional: 1 = input/high
+
+static bool expanderWrite(uint8_t val) {
+  Wire.beginTransmission(TALON_EXPANDER_ADDR);
+  Wire.write(val);
+  return Wire.endTransmission() == 0;
+}
+
+static bool expanderRead(uint8_t &val) {
+  if (Wire.requestFrom((int)TALON_EXPANDER_ADDR, 1) != 1) return false;
+  val = (uint8_t)Wire.read();
+  return true;
+}
+
+static void expanderSetXshut(uint8_t idx, bool high) {
+  if (high)
+    expanderShadow |= (uint8_t)(1 << idx);
+  else
+    expanderShadow &= (uint8_t)~(1 << idx);
+  // keep P5-P7 high (inputs stay readable on a PCF8574 when written 1)
+  expanderWrite((uint8_t)(expanderShadow | 0xE0));
+}
+
 // ---------------- sensors ----------------
 static void tofInitAll() {
-  for (uint8_t i = 0; i < 5; i++) {
-    pinMode(PIN_TOF_XSHUT[i], OUTPUT);
-    digitalWrite(PIN_TOF_XSHUT[i], LOW);  // hold all in reset
+  uint8_t dummy;
+  expanderOk = expanderWrite(0xE0) && expanderRead(dummy);  // all XSHUT low
+  if (!expanderOk) {
+    for (uint8_t i = 0; i < 5; i++) tofState[i].present = false;
+    return;  // no expander: ToF + edge FAIL in Sensor Health, OS still runs
   }
   delay(10);  // boot-time only
   for (uint8_t i = 0; i < 5; i++) {
     IWatchdog.reload();
-    digitalWrite(PIN_TOF_XSHUT[i], HIGH);
+    expanderSetXshut(i, true);
     delay(10);
-    tof[i].setTimeout(30);  // short I2C timeout — never stalls the loop
+    tof[i].setTimeout(15);  // short timeout per updated spec 6.1
     if (tof[i].init()) {
-      tof[i].setAddress(0x2A + i);  // unique address per sensor
+      tof[i].setAddress(0x2A + i);
       tof[i].setDistanceMode(VL53L1X::Short);
       tof[i].setMeasurementTimingBudget(20000);
       tof[i].startContinuous(33);
       tofState[i].present = true;
     } else {
-      tofState[i].present = false;  // FAIL in Sensor Health, keep going
+      tofState[i].present = false;
     }
   }
 }
@@ -77,15 +113,13 @@ static bool imuWrite(uint8_t reg, uint8_t val) {
   return Wire.endTransmission() == 0;
 }
 
-static void imuInit() {
-  imu.present = imuWrite(0x6B, 0x00);  // wake MPU6050
-}
+static void imuInit() { imu.present = imuWrite(0x6B, 0x00); }
 
 static void imuUpdate(uint32_t now) {
   if (!imu.present || now - lastImuMs < 20) return;  // 50 Hz
   lastImuMs = now;
   Wire.beginTransmission(IMU_I2C_ADDR);
-  Wire.write(0x3B);  // ACCEL_XOUT_H
+  Wire.write(0x3B);
   if (Wire.endTransmission(false) != 0) return;
   if (Wire.requestFrom((int)IMU_I2C_ADDR, 6) != 6) return;
   int16_t ax = (Wire.read() << 8) | Wire.read();
@@ -97,7 +131,6 @@ static void imuUpdate(uint32_t now) {
   imu.flipped = (fz < 0);
   float mag = sqrtf(fx * fx + fy * fy + fz * fz);
   accMag = accMag * 0.7f + mag * 0.3f;
-  // impact = sudden deviation from 1 g beyond the push-sense threshold
   if (fabsf(mag - accMag) > G.cur.pushSense * 0.1f) imu.impact = true;
 }
 
@@ -107,21 +140,25 @@ static void sensorsUpdate(uint32_t now) {
       tofState[i].ok = false;
       continue;
     }
-    if (tof[i].dataReady()) {           // non-blocking check
-      uint16_t mm = tof[i].read(false); // reads already-available data
+    if (tof[i].dataReady()) {
+      uint16_t mm = tof[i].read(false);
       if (mm > 0 && !tof[i].timeoutOccurred()) {
         int32_t adj = (int32_t)mm + G.cur.tofZeroOffsetMm;
         tofState[i].mm = (uint16_t)((adj < 0) ? 0 : adj);
         tofLastOk[i] = now;
       }
     }
-    // PASS = valid reading within 300 ms; auto-flags 0/timeout (spec 2.1)
     tofState[i].ok = (now - tofLastOk[i]) < 300 && tofState[i].mm > 0;
   }
-  edgeValL = (int16_t)analogRead(PIN_EDGE_LEFT);
-  edgeValR = (int16_t)analogRead(PIN_EDGE_RIGHT);
-  edgeL = edgeValL > G.cur.edgeThreshold;  // white boundary reflects more
-  edgeR = edgeValR > G.cur.edgeThreshold;
+  // digital edge sensors via expander P5/P6, polled at 200 Hz (5 ms)
+  if (expanderOk && now - lastExpanderMs >= 5) {
+    lastExpanderMs = now;
+    uint8_t v;
+    if (expanderRead(v)) {
+      edgeL = (v & (1 << 5)) != 0;  // module output HIGH on white boundary
+      edgeR = (v & (1 << 6)) != 0;
+    }
+  }
   imuUpdate(now);
 }
 
@@ -143,14 +180,22 @@ int opponentDirIdx() {
   return idx;
 }
 
+// masked variants — used ONLY for transition-trigger / give-up evaluation
+static int opponentDistMasked(uint8_t mask) {
+  int best = -1;
+  for (uint8_t i = 0; i < 5; i++)
+    if (tofState[i].ok && !(mask & TOF_IGN_BIT[i]) &&
+        (best < 0 || tofState[i].mm < best))
+      best = tofState[i].mm;
+  return best;
+}
+
 // ---------------- 200 Hz control ISR ----------------
-// Steering PID lives entirely inside the ISR (its own state); it reads the
-// volatile command block and writes motor PWM. Kept deliberately short.
 static void controlIsr() {
   static float integ = 0, prevErr = 0;
   int16_t l, r;
   if (cmd.steerPid && cmd.valid) {
-    float err = (float)(cmd.dirIdx - 2);  // -2..+2, 0 = dead ahead
+    float err = (float)(cmd.dirIdx - 2);
     integ += err * 0.005f;
     if (integ > 50) integ = 50;
     if (integ < -50) integ = -50;
@@ -167,8 +212,9 @@ static void controlIsr() {
     l = cmd.l;
     r = cmd.r;
   }
-  motorL.setPercent(l);
-  motorR.setPercent(r);
+  uint8_t s = cmd.slipScalePct;  // traction "Reduce Power" (addendum 1.1)
+  motorL.setPercent((int16_t)((int32_t)l * s / 100));
+  motorR.setPercent((int16_t)((int32_t)r * s / 100));
 }
 
 // ---------------- motors ----------------
@@ -176,8 +222,8 @@ void talonHwBegin() {
   LzMotor::Mode m = G.cur.motorMode == 0 ? LzMotor::ESC : LzMotor::HBRIDGE;
   motorL.begin(m, PIN_MOTOR_L_PWM, PIN_MOTOR_L_DIR);
   motorR.begin(m, PIN_MOTOR_R_PWM, PIN_MOTOR_R_DIR);
-  pinMode(PIN_EDGE_LEFT, INPUT_ANALOG);
-  pinMode(PIN_EDGE_RIGHT, INPUT_ANALOG);
+  encL.begin(PIN_ENC_L_A, PIN_ENC_L_B);
+  encR.begin(PIN_ENC_R_A, PIN_ENC_R_B);
   tofInitAll();
   imuInit();
   ctlTimer.setOverflow(200, HERTZ_FORMAT);
@@ -192,7 +238,7 @@ void talonMotorsReinit() {
 }
 
 static void cmdOpenLoop(int16_t l, int16_t r) {
-  noInterrupts();  // brief critical section — multi-field update (spec 6.2)
+  noInterrupts();
   cmd.steerPid = false;
   cmd.l = l;
   cmd.r = r;
@@ -205,7 +251,7 @@ void talonMotorsStop() {
 }
 
 void talonMotorsTestPulse(int16_t pctL, int16_t pctR, uint16_t ms) {
-  if (runState() != RS_IDLE) return;  // never during a match
+  if (runState() != RS_IDLE) return;
   cmdOpenLoop(pctL, pctR);
   pulseEnd = millis() + ms;
   pulsing = true;
@@ -213,22 +259,37 @@ void talonMotorsTestPulse(int16_t pctL, int16_t pctR, uint16_t ms) {
 
 // ---------------- RUN MODE engine ----------------
 static RunState rs = RS_IDLE;
-static uint32_t rsT0 = 0;          // countdown start / run start
+static uint32_t rsT0 = 0;
+static uint32_t matchT0 = 0;
 static uint8_t phase = 0;
 static uint32_t phaseT0 = 0;
 static uint32_t giveUpT0 = 0;
 static int bestDist = -1;
 static uint8_t cdBeeps = 0;
 static char stopReason[20] = "";
-static bool evading = false;
-static uint32_t evadeT0 = 0;
 static const char *actionName = "IDLE";
+static bool boosted = false;
+static bool angleDone = false;
+// Edge Escape sub-state
+static bool escaping = false;
+static uint32_t escT0 = 0;
+// give-up retreat sub-state
+static bool givingUp = false;
+static uint32_t giveT0v = 0;
+// traction
+static bool slipFlag = false;
+static uint32_t slipHoldUntil = 0, lastTracMs = 0;
+static uint8_t slipCount = 0;
+
+static const uint16_t SPIN_MS_PER_DEG = 4;  // timed-turn rate: TUNE ON ROBOT
 
 RunState runState() { return rs; }
 uint8_t runPhaseIdx() { return phase; }
 const char *runActionName() { return actionName; }
-uint32_t runElapsedMs() { return rs == RS_RUNNING ? millis() - rsT0 : 0; }
+uint32_t runElapsedMs() { return rs == RS_RUNNING ? millis() - matchT0 : 0; }
 const char *runStopReason() { return stopReason; }
+bool runBoosted() { return boosted; }
+bool tractionSlipActive() { return slipFlag; }
 uint16_t runCountdownMs() {
   if (rs != RS_COUNTDOWN) return 0;
   uint32_t e = millis() - rsT0;
@@ -241,7 +302,14 @@ static Strategy &activeStrategy() {
   return G.strategies[i];
 }
 
-void runStart() {
+uint32_t runMatchRemainingMs() {
+  if (rs != RS_RUNNING) return (uint32_t)activeStrategy().matchDurS * 1000;
+  uint32_t dur = (uint32_t)activeStrategy().matchDurS * 1000;
+  uint32_t e = millis() - matchT0;
+  return e >= dur ? 0 : dur - e;
+}
+
+void runStart() {  // initial arm AND Quick Rematch: full state reset
   Strategy &s = activeStrategy();
   if (!s.used || s.phaseCount == 0) {
     Buzzer.play(SND_ERROR);
@@ -251,7 +319,12 @@ void runStart() {
   rsT0 = millis();
   cdBeeps = 0;
   stopReason[0] = 0;
-  OS.setRunActive(true);  // blocks flash writes (spec 6.1)
+  boosted = false;
+  escaping = false;
+  givingUp = false;
+  slipFlag = false;
+  cmd.slipScalePct = 100;
+  OS.setRunActive(true);
   Leds.green(LZLED_BLINK_FAST);
   actionName = "COUNTDOWN";
 }
@@ -265,57 +338,115 @@ void runAbort(const char *reason) {
   actionName = "IDLE";
 }
 
+static void postMatch(const char *reason) {
+  rs = RS_POSTMATCH;
+  talonMotorsStop();
+  OS.setRunActive(false);
+  Leds.green(LZLED_BLINK);
+  snprintf(stopReason, sizeof(stopReason), "%s", reason);
+  actionName = "POST-MATCH";
+  Buzzer.play(SND_MATCH_START);
+}
+
 static void enterPhase(uint8_t idx, uint32_t now) {
   Strategy &s = activeStrategy();
   phase = (idx < s.phaseCount) ? idx : 0;
   phaseT0 = now;
+  angleDone = false;
   imu.impact = false;
 }
 
-// translate the current phase into motor commands
+// active phase's ignore mask, valid only inside its window (addendum 1.6)
+static uint8_t curIgnoreMask(uint32_t now) {
+  Strategy &s = activeStrategy();
+  Phase &p = s.phases[phase];
+  return (p.ignoreMs && (now - phaseT0) < p.ignoreMs) ? p.ignoreMask : 0;
+}
+
+// shared retreat-style motion patterns (RETREAT phases, Edge Escape,
+// give-up retreat). kind: 0=Backup+Turn 1=Backup-only 2=Center
+static bool driveRetreatPattern(uint8_t kind, uint32_t el, float ramp) {
+  int16_t fwd = (int16_t)(G.cur.maxFwdPct * ramp);
+  int16_t rev = (int16_t)(-G.cur.maxRevPct * ramp);
+  switch (kind) {
+    case 0:  // Backup+Turn
+      if (el < 600) cmdOpenLoop(rev, rev);
+      else if (el < 1100) cmdOpenLoop((int16_t)(fwd / 2), (int16_t)(-fwd / 2));
+      else return true;
+      break;
+    case 1:  // Backup-only
+      if (el < 800) cmdOpenLoop(rev, rev);
+      else return true;
+      break;
+    default:  // Reposition-to-center
+      if (el < 500) cmdOpenLoop(rev, rev);
+      else if (el < 900) cmdOpenLoop((int16_t)(fwd / 2), (int16_t)(-fwd / 2));
+      else if (el < 1500) cmdOpenLoop((int16_t)(fwd / 2), (int16_t)(fwd / 2));
+      else return true;
+      break;
+  }
+  return false;
+}
+
 static void drivePhase(uint32_t now) {
   Strategy &s = activeStrategy();
   Phase &p = s.phases[phase];
-  int16_t fwd = G.cur.maxFwdPct, rev = (int16_t)-G.cur.maxRevPct;
   uint32_t el = now - phaseT0;
+  // ramp-up/ramp-down factor (addendum 1.2): 0 = instant
+  float ramp = 1.0f;
+  if (p.rampMs > 0 && (phaseIsAttack(p.type) || phaseIsRetreat(p.type))) {
+    ramp = (float)el / p.rampMs;
+    if (ramp > 1.0f) ramp = 1.0f;
+  }
+  int16_t fwd = (int16_t)(G.cur.maxFwdPct * ramp);
+  int16_t rev = (int16_t)(-G.cur.maxRevPct * ramp);
   actionName = PHASE_TYPE_NAMES[p.type];
 
   switch (p.type) {
     case PH_SEARCH_SPIN:
-      cmdOpenLoop((int16_t)(fwd / 2), (int16_t)(-fwd / 2));
-      break;
     case PH_SEARCH_SWEEP: {
-      // arc left/right alternating each second
-      bool left = (el / 1000) & 1;
-      cmdOpenLoop(left ? (int16_t)(fwd / 3) : (int16_t)(fwd * 2 / 3),
-                  left ? (int16_t)(fwd * 2 / 3) : (int16_t)(fwd / 3));
+      // differential-speed search radius (addendum 1.3):
+      // outer = s, inner = s*(2r-100)/100 -> r=0 pure spin, r=100 straight
+      int16_t s0 = (int16_t)(G.cur.maxFwdPct / 2);
+      int16_t inner = (int16_t)((int32_t)s0 * (2 * p.searchRadius - 100) / 100);
+      bool swap = (p.type == PH_SEARCH_SWEEP) && ((el / 1000) & 1);
+      cmdOpenLoop(swap ? inner : s0, swap ? s0 : inner);
+      break;
+    }
+    case PH_SEARCH_CRAWL:  // addendum 1.4: own low speed
+      cmdOpenLoop((int16_t)p.crawlPct, (int16_t)p.crawlPct);
+      break;
+    case PH_ANGLED_TURN: {  // addendum 1.5: timed pivot to target angle
+      uint32_t target = (uint32_t)abs(p.angleDeg) * SPIN_MS_PER_DEG;
+      if (!angleDone && el < target) {
+        int16_t s0 = (int16_t)(G.cur.maxFwdPct / 2);
+        if (p.angleCW) cmdOpenLoop(s0, (int16_t)-s0);
+        else cmdOpenLoop((int16_t)-s0, s0);
+      } else {
+        angleDone = true;
+        cmdOpenLoop(0, 0);  // hold; phase's trigger decides what's next
+      }
       break;
     }
     case PH_SEARCH_CHARGE:
     case PH_ATT_RAM: {
-      // straight-ahead with PID aim when the opponent is visible
       noInterrupts();
       cmd.steerPid = true;
       cmd.base = (p.type == PH_ATT_RAM) ? fwd : (int16_t)(fwd * 3 / 4);
-      cmd.dirIdx = (int8_t)opponentDirIdx();
+      cmd.dirIdx = (int8_t)opponentDirIdx();  // motion uses raw sensors
       cmd.valid = opponentDistMm() > 0;
       interrupts();
       break;
     }
     case PH_ATT_CURVE: {
-      // arcing approach biased toward the opponent's side
       int dir = opponentDirIdx();
       int16_t inner = (int16_t)(fwd / 2), outer = fwd;
-      if (dir <= 1)
-        cmdOpenLoop(inner, outer);       // opponent left -> arc left
-      else if (dir >= 3)
-        cmdOpenLoop(outer, inner);       // opponent right -> arc right
-      else
-        cmdOpenLoop(outer, (int16_t)(outer * 4 / 5));  // gentle default arc
+      if (dir <= 1) cmdOpenLoop(inner, outer);
+      else if (dir >= 3) cmdOpenLoop(outer, inner);
+      else cmdOpenLoop(outer, (int16_t)(outer * 4 / 5));
       break;
     }
     case PH_ATT_SIDE: {
-      // wide flank for ~40% of the phase, then cut in hard
       if (el < (uint32_t)(p.durDs * 40))
         cmdOpenLoop(fwd, (int16_t)(fwd / 4));
       else
@@ -323,43 +454,69 @@ static void drivePhase(uint32_t now) {
       break;
     }
     case PH_RET_BACKTURN:
-      if (el < 600)
-        cmdOpenLoop(rev, rev);
-      else
-        cmdOpenLoop((int16_t)(fwd / 2), (int16_t)(-fwd / 2));
-      break;
     case PH_RET_BACKONLY:
-      cmdOpenLoop(rev, rev);
-      break;
     case PH_RET_CENTER:
     default:
-      // back off, quarter-turn, push toward center
-      if (el < 500)
-        cmdOpenLoop(rev, rev);
-      else if (el < 900)
-        cmdOpenLoop((int16_t)(fwd / 2), (int16_t)(-fwd / 2));
-      else
-        cmdOpenLoop((int16_t)(fwd / 2), (int16_t)(fwd / 2));
+      (void)rev;
+      driveRetreatPattern((uint8_t)(p.type - PH_RET_BACKTURN),
+                          el % 1600, ramp);  // loop the pattern for duration
       break;
   }
+}
+
+// traction / wheel-slip detection (addendum 1.1). Inert without encoders.
+static void tractionTick(uint32_t now) {
+  if (!G.cur.tractionEnable || !imu.present ||
+      (!encL.present() && !encR.present())) {
+    slipFlag = false;
+    return;
+  }
+  if (now - lastTracMs < 50) return;
+  lastTracMs = now;
+  int32_t wheel = labs(encL.takeDelta()) + labs(encR.takeDelta());
+  int16_t cmdMag = (int16_t)(abs(cmd.l) + abs(cmd.r));
+  // wheels turning fast + commanded hard + IMU sees no acceleration change
+  bool slipNow = cmdMag > 80 && wheel > (int32_t)(10 * G.cur.slipSense) &&
+                 fabsf(accMag - 1.0f) < 0.02f * G.cur.slipSense;
+  slipCount = slipNow ? (uint8_t)(slipCount + 1) : 0;
+  if (slipCount >= 3) {  // ~150 ms sustained
+    slipFlag = true;
+    switch (G.cur.slipResponse) {
+      case 0:  // Reduce Power briefly, then reapply
+        cmd.slipScalePct = 50;
+        slipHoldUntil = now + 300;
+        break;
+      case 2:  // Trigger Retreat: trip the give-up timer immediately
+        giveUpT0 = now - (uint32_t)activeStrategy().giveUpDs * 100 - 1;
+        break;
+      default:
+        break;  // Alert Only: flag shows on Run screen / red LED
+    }
+    slipCount = 0;
+  }
+  if (slipHoldUntil && now > slipHoldUntil) {
+    cmd.slipScalePct = 100;
+    slipHoldUntil = 0;
+  }
+  if (slipFlag && !slipNow && slipCount == 0 && cmd.slipScalePct == 100)
+    slipFlag = false;
 }
 
 static void engineTick(uint32_t now) {
   if (rs == RS_COUNTDOWN) {
     uint32_t e = now - rsT0;
     uint8_t sec = (uint8_t)(e / 1000);
-    if (sec + 1 > cdBeeps && sec < 5) {  // beep each countdown second
+    if (sec + 1 > cdBeeps && sec < 5) {
       cdBeeps = (uint8_t)(sec + 1);
       Buzzer.play(SND_CLICK);
       OS.requestRedraw();
     }
-    if (e >= 5000) {  // competition-rule 5 s delay done — fight!
+    if (e >= 5000) {
       Buzzer.play(SND_MATCH_START);
       rs = RS_RUNNING;
-      rsT0 = now;
+      matchT0 = now;
       giveUpT0 = now;
       bestDist = -1;
-      evading = false;
       enterPhase(0, now);
     }
     return;
@@ -368,8 +525,9 @@ static void engineTick(uint32_t now) {
 
   Strategy &s = activeStrategy();
   Phase &p = s.phases[phase];
+  uint8_t mask = curIgnoreMask(now);
 
-  // --- IMU safety (spec 2.1 Orientation): cut motors when flipped/tilted
+  // --- IMU safety
   if (G.cur.autoStopFlip && imu.present &&
       (imu.flipped || imu.tiltDeg > G.cur.tiltLimitDeg)) {
     Buzzer.play(SND_ERROR);
@@ -377,70 +535,105 @@ static void engineTick(uint32_t now) {
     return;
   }
 
-  // --- edge handling: trigger transition if the phase asks for it,
-  //     otherwise reflex-evade so we never drive off the dohyo
-  if (edgeL || edgeR) {
-    if (p.trigger == TR_EDGE) {
-      enterPhase((uint8_t)(phase + 1 >= s.phaseCount ? 0 : phase + 1), now);
-    } else if (!evading) {
-      evading = true;
-      evadeT0 = now;
+  // --- Match Timer (addendum 1.8): expiry -> post-match screen
+  uint32_t matchDur = (uint32_t)s.matchDurS * 1000;
+  uint32_t matchEl = now - matchT0;
+  if (matchEl >= matchDur) {
+    postMatch("TIME UP");
+    return;
+  }
+  // Aggression Boost: no clear win by threshold -> jump to boost phase
+  if (!boosted && s.boostThreshS > 0 &&
+      (matchDur - matchEl) <= (uint32_t)s.boostThreshS * 1000) {
+    boosted = true;
+    if (s.boostPhase < s.phaseCount) {
+      enterPhase(s.boostPhase, now);
+      giveUpT0 = now;  // boost is a fresh commitment
+      bestDist = -1;
+      Buzzer.play(SND_LOWBATT);  // audible escalation cue
     }
   }
-  if (evading) {
-    actionName = "EDGE-EVADE";
-    int16_t fwd = G.cur.maxFwdPct;
-    if (now - evadeT0 < 450)
-      cmdOpenLoop((int16_t)-G.cur.maxRevPct, (int16_t)-G.cur.maxRevPct);
-    else if (now - evadeT0 < 800)
-      cmdOpenLoop((int16_t)(fwd / 2), (int16_t)(-fwd / 2));
-    else
-      evading = false;
-    return;  // reflex overrides the phase while active
+
+  tractionTick(now);
+
+  // --- edge handling: masked edges are invisible to triggers AND escape
+  bool eL = edgeL && !(mask & IGN_EDGE_L);
+  bool eR = edgeR && !(mask & IGN_EDGE_R);
+  if ((eL || eR) && !escaping && !givingUp) {
+    if (p.trigger == TR_EDGE) {
+      // phase explicitly listening for edge keeps its own trigger
+      enterPhase((uint8_t)(phase + 1 >= s.phaseCount ? 0 : phase + 1), now);
+    } else {
+      escaping = true;  // Edge Escape interrupt (addendum 1.7)
+      escT0 = now;
+      Buzzer.play(SND_CLICK);
+    }
+  }
+  if (escaping) {
+    actionName = "EDGE-ESCAPE";
+    if (driveRetreatPattern(s.escapeManeuver, now - escT0, 1.0f)) {
+      escaping = false;
+      switch (s.escapeResume) {  // resume behavior (addendum 1.7)
+        case 1:  // resume next phase in sequence
+          enterPhase((uint8_t)(phase + 1 >= s.phaseCount ? 0 : phase + 1), now);
+          break;
+        case 2: {  // fall back to first SEARCH phase
+          uint8_t tgt = 0;
+          for (uint8_t i = 0; i < s.phaseCount; i++)
+            if (phaseIsSearch(s.phases[i].type)) {
+              tgt = i;
+              break;
+            }
+          enterPhase(tgt, now);
+          break;
+        }
+        default:  // restart strategy
+          enterPhase(0, now);
+          break;
+      }
+      giveUpT0 = now;
+    }
+    return;  // escape overrides phase motion
   }
 
-  // --- give-up safety timer (spec 2.2): in ATTACK with no progress
-  int dist = opponentDistMm();
+  // --- give-up safety timer (uses masked distance: trigger-class logic)
+  int dist = opponentDistMasked(mask);
   if (dist > 0 && (bestDist < 0 || dist < bestDist - 50)) {
-    bestDist = dist;   // gained ≥5 cm on the opponent — progress
+    bestDist = dist;
     giveUpT0 = now;
   }
-  if (imu.impact && phaseIsAttack(p.type)) giveUpT0 = now;  // push detected
-  if (phaseIsAttack(p.type) &&
+  if (imu.impact && phaseIsAttack(p.type)) giveUpT0 = now;
+  if (!givingUp && phaseIsAttack(p.type) &&
       (now - giveUpT0) > (uint32_t)s.giveUpDs * 100) {
-    // force the designated retreat, then restart the playbook
-    static Phase retreatPhase;
-    retreatPhase.type = (uint8_t)(PH_RET_BACKTURN + s.giveUpRetreat);
-    retreatPhase.trigger = TR_TIME;
-    retreatPhase.durDs = 15;
-    // run retreat inline: reuse phase slot semantics by direct drive
+    givingUp = true;
+    giveT0v = now;
+  }
+  if (givingUp) {
     actionName = "GIVE-UP RETREAT";
-    uint32_t el = now - (giveUpT0 + (uint32_t)s.giveUpDs * 100);
-    int16_t fwd = G.cur.maxFwdPct, rev = (int16_t)-G.cur.maxRevPct;
-    if (el < 700)
-      cmdOpenLoop(rev, rev);
-    else if (el < 1200)
-      cmdOpenLoop((int16_t)(fwd / 2), (int16_t)(-fwd / 2));
-    else {
-      enterPhase(0, now);  // playbook restarts at phase 1
+    if (driveRetreatPattern(s.giveUpRetreat, now - giveT0v, 1.0f)) {
+      givingUp = false;
+      enterPhase(0, now);
       giveUpT0 = now;
       bestDist = -1;
     }
     return;
   }
 
-  // --- normal phase transitions
+  // --- normal phase transitions (masked sensors; time unaffected)
   bool advance = false;
   switch (p.trigger) {
     case TR_TIME:
       advance = (now - phaseT0) >= (uint32_t)p.durDs * 100;
       break;
     case TR_OPPONENT:
-      advance = (dist > 0 && dist < 800);  // opponent detected in range
+      advance = (dist > 0 && dist < 800);
       break;
     case TR_EDGE:
       break;  // handled above
   }
+  // Angled Turn with a Time trigger: duration counts AFTER the turn finishes
+  if (p.type == PH_ANGLED_TURN && p.trigger == TR_TIME && !angleDone)
+    advance = false;
   if (advance)
     enterPhase((uint8_t)(phase + 1 >= s.phaseCount ? 0 : phase + 1), now);
 
