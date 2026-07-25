@@ -6,6 +6,7 @@
 #define LZ_FW_VERSION        "v1.0.0"
 #define LZ_BRAND_LINE_1      "Owned by Team Lanzones"
 #define LZ_BRAND_LINE_2      "Partnered by Koogs Robotics"
+#define LZ_BRAND_SHORT       "LANZONES x KOOGS"  // fits 128px (spec 1 frame 2)
 
 #define LZ_NAME_LEN          10    // named-slot length, incl. terminator
 #define LZ_MAX_STACK         8     // max screen-stack depth

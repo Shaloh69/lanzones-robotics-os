@@ -14,7 +14,9 @@
 class LzOS {
  public:
   void begin(const char *osName, const char *buildId);
-  void showSplash(uint16_t ms = 1800);
+  // Two-frame boot splash (spec 1): 64x64 logo fades in (contrast ramp),
+  // holds ~600ms, fades to OS name + version + "LANZONES x KOOGS".
+  void showSplash(const uint8_t *logo64);
 
   void push(LzScreen *s);
   void pop();

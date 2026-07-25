@@ -6,6 +6,7 @@
 #include <Arduino.h>
 
 #include <LzBatteryScreen.h>
+#include <LzLogos.h>
 #include <LzOS.h>
 #include <LzUi.h>
 
@@ -67,7 +68,7 @@ static LzMenuScreen mainMenu("MAIN", MAIN_ITEMS,
 void setup() {
   talonLoad();  // flash image or defaults (before anything reads G)
   OS.begin("TALON", TALON_BUILD_ID);
-  OS.showSplash();
+  OS.showSplash(logo_talon_eagle);  // two-frame splash (spec 1 + logos.h)
   talonHwBegin();
   OS.push(&mainMenu);
   Leds.green(LZLED_ON);  // ready/healthy at a glance

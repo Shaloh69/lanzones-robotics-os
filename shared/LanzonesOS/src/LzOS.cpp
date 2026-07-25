@@ -27,26 +27,49 @@ void LzOS::begin(const char *name, const char *bid) {
   Buzzer.play(SND_BOOT);
 }
 
-void LzOS::showSplash(uint16_t ms) {
-  U8G2 &g = Display.gfx();
-  g.clearBuffer();
-  g.setFont(u8g2_font_ncenB10_tr);
-  g.drawStr((128 - g.getStrWidth("TEAM LANZONES")) / 2, 16, "TEAM LANZONES");
-  char l2[24];
-  snprintf(l2, sizeof(l2), "%s %s", osName, LZ_FW_VERSION);
-  g.setFont(u8g2_font_7x13B_tr);
-  g.drawStr((128 - g.getStrWidth(l2)) / 2, 33, l2);
-  g.setFont(u8g2_font_5x7_tr);
-  g.drawStr((128 - g.getStrWidth(LZ_BRAND_LINE_1)) / 2, 48, LZ_BRAND_LINE_1);
-  g.drawStr((128 - g.getStrWidth(LZ_BRAND_LINE_2)) / 2, 58, LZ_BRAND_LINE_2);
-  g.sendBuffer();
-  // Boot-time bounded wait (before the state machine starts) — keeps the
-  // watchdog fed and the boot jingle playing. Not used anywhere after boot.
+// Boot-time bounded wait — keeps the watchdog fed and the boot jingle
+// playing. Only ever used inside the splash, before the state machine runs.
+static void splashWait(uint32_t ms) {
   uint32_t t0 = millis();
   while (millis() - t0 < ms) {
     IWatchdog.reload();
     Buzzer.tick(millis());
   }
+}
+
+// SSD1306 "fade" = contrast ramp (the panel has no grayscale).
+static void fadeTo(U8G2 &g, int from, int to) {
+  int step = (to > from) ? 15 : -15;
+  for (int c = from; (step > 0) ? c < to : c > to; c += step) {
+    g.setContrast((uint8_t)c);
+    splashWait(15);
+  }
+  g.setContrast((uint8_t)to);
+}
+
+void LzOS::showSplash(const uint8_t *logo64) {
+  U8G2 &g = Display.gfx();
+
+  // Frame 1: OS logo alone — 64x64, full display height, centered.
+  // logos.h is Adafruit-style horizontal MSB-first => drawBitmap, not XBM.
+  g.setContrast(0);
+  g.clearBuffer();
+  if (logo64) g.drawBitmap(32, 0, 8, 64, logo64);
+  g.sendBuffer();
+  fadeTo(g, 0, 255);   // fade in
+  splashWait(600);     // hold
+  fadeTo(g, 255, 0);   // fade out toward the text frame
+
+  // Frame 2: OS name (large) + firmware version + "LANZONES x KOOGS"
+  g.clearBuffer();
+  g.setFont(u8g2_font_ncenB14_tr);
+  g.drawStr((128 - g.getStrWidth(osName)) / 2, 26, osName);
+  g.setFont(u8g2_font_5x7_tr);
+  g.drawStr((128 - g.getStrWidth(LZ_FW_VERSION)) / 2, 42, LZ_FW_VERSION);
+  g.drawStr((128 - g.getStrWidth(LZ_BRAND_SHORT)) / 2, 58, LZ_BRAND_SHORT);
+  g.sendBuffer();
+  fadeTo(g, 0, 255);
+  splashWait(900);
 }
 
 void LzOS::rebuildCrumb() {

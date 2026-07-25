@@ -7,7 +7,8 @@
 #include "build_id.h"
 
 static const LzHelpEntry HELP[] = {
-    {"About / Branding",
+    // branding line as the permanent top row of the index (spec 8)
+    {"LANZONES x KOOGS",
      "VECTOR Line\nFollower OS\n" LZ_FW_VERSION "\n"
      "Owned by\n Team Lanzones\nPartnered by\n Koogs Robotics\n"
      "Build ID:\n " VECTOR_BUILD_ID},

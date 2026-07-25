@@ -6,6 +6,7 @@
 #include <Arduino.h>
 
 #include <LzBatteryScreen.h>
+#include <LzLogos.h>
 #include <LzOS.h>
 #include <LzUi.h>
 
@@ -65,7 +66,7 @@ static LzMenuScreen mainMenu("MAIN", MAIN_ITEMS,
 void setup() {
   vectorLoad();  // flash image or defaults (before anything reads G)
   OS.begin("VECTOR", VECTOR_BUILD_ID);
-  OS.showSplash();
+  OS.showSplash(logo_vector_road);  // two-frame splash (spec 1 + logos.h)
   vectorHwBegin();
   OS.push(&mainMenu);
   Leds.green(LZLED_ON);  // ready/healthy at a glance
