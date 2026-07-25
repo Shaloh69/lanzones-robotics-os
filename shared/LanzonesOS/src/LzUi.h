@@ -54,8 +54,8 @@ class LzNumEditor : public LzScreen {
   void (*onTest_)() = nullptr;
   void (*onDone_)(bool) = nullptr;
   bool isFloat_ = true;
-  float *fp_ = nullptr, fMin_ = 0, fMax_ = 0, fStep_ = 0, fVal_ = 0;
-  int16_t *ip_ = nullptr, iMin_ = 0, iMax_ = 0, iStep_ = 0, iVal_ = 0;
+  float *fp_ = nullptr, fMin_ = 0, fMax_ = 0, fStep_ = 0, fVal_ = 0, fOrig_ = 0;
+  int16_t *ip_ = nullptr, iMin_ = 0, iMax_ = 0, iStep_ = 0, iVal_ = 0, iOrig_ = 0;
   uint8_t dec_ = 1;
 };
 

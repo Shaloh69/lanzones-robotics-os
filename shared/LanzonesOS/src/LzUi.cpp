@@ -50,7 +50,7 @@ void LzNumEditor::openF(const char *label, float *v, float mn, float mx,
   if (!OS.editAllowed()) return;  // Lock Config enforcement
   label_ = label; unit_ = unit; onTest_ = onTest; onDone_ = onDone;
   isFloat_ = true; fp_ = v; fMin_ = mn; fMax_ = mx; fStep_ = step;
-  fVal_ = *v; dec_ = decimals;
+  fVal_ = fOrig_ = *v; dec_ = decimals;
   OS.push(this);
 }
 
@@ -60,7 +60,7 @@ void LzNumEditor::openI(const char *label, int16_t *v, int16_t mn, int16_t mx,
   if (!OS.editAllowed()) return;
   label_ = label; unit_ = unit; onTest_ = onTest; onDone_ = onDone;
   isFloat_ = false; ip_ = v; iMin_ = mn; iMax_ = mx; iStep_ = step;
-  iVal_ = *v; dec_ = 0;
+  iVal_ = iOrig_ = *v; dec_ = 0;
   OS.push(this);
 }
 
@@ -91,6 +91,8 @@ bool LzNumEditor::onEvent(const LzEvent &ev) {
     return true;
   }
   if (ev.btn == BTN_BACK && ev.type == EV_PRESS) {  // cancel
+    // restore the original — a test-drive may have applied the working value
+    if (isFloat_) *fp_ = fOrig_; else *ip_ = iOrig_;
     OS.pop();
     if (onDone_) onDone_(false);
     return true;

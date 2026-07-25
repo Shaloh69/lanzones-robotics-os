@@ -3,6 +3,7 @@
 #include "LzScreen.h"
 
 void LzDisplay::begin() {
+  u8g2_.setBusClock(400000);  // 400 kHz: full-frame transfer ~23 ms, not ~90
   u8g2_.begin();
   u8g2_.setFontPosBaseline();
 }

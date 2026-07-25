@@ -6,6 +6,7 @@ void LzMotor::begin(Mode m, uint8_t pwmPin, uint8_t dirPin) {
   pwmPin_ = pwmPin;
   dirPin_ = dirPin;
   pinMode(pwmPin_, OUTPUT);
+  analogWriteResolution(12);      // 4096 steps: ~4.9 us granularity at 50 Hz
   if (mode_ == HBRIDGE) {
     pinMode(dirPin_, OUTPUT);
     digitalWrite(dirPin_, LOW);
@@ -24,13 +25,13 @@ void LzMotor::setPercent(int16_t pct) {
   pct_ = pct;
   if (mode_ == HBRIDGE) {
     digitalWrite(dirPin_, pct >= 0 ? HIGH : LOW);
-    int duty = (int)((pct >= 0 ? pct : -pct) * 255L / 100L);
+    int duty = (int)((pct >= 0 ? pct : -pct) * 4095L / 100L);
     analogWrite(pwmPin_, duty);
   } else {
     // ESC: 1500 us neutral, 1000/2000 us full reverse/forward.
-    // At 50 Hz, period = 20000 us; 8-bit duty maps linearly.
+    // At 50 Hz, period = 20000 us; 12-bit duty maps linearly (~4.9 us/step).
     int us = 1500 + (int)pct * 5;
-    int duty = (int)((int32_t)us * 255L / 20000L);
+    int duty = (int)((int32_t)us * 4095L / 20000L);
     analogWrite(pwmPin_, duty);
   }
 }
