@@ -4,6 +4,9 @@
 #include <IWatchdog.h>
 #include "stm32f4xx_hal.h"
 
+#include "LzConfig.h"
+#include "LzEeprom.h"
+
 volatile bool lzStoreRunGuard = false;
 
 static const uint32_t STORE_ADDR = 0x08060000UL;  // F411CE sector 7 (128 KB)
@@ -16,6 +19,19 @@ struct StoreHeader {
 };
 static const uint32_t STORE_MAGIC = 0x4C4E5A53UL;  // "SZNL"
 
+// External EEPROM mirror (spec 1): best-effort secondary copy on the shared
+// I2C bus. Internal flash above is authoritative; an absent/failed EEPROM
+// never fails a save or blocks a load — it's pure extra resilience. Layout
+// is independent of the internal-flash one (header, then payload, then a
+// CRC over the payload alone — no need for a contiguous header+payload
+// buffer like the in-flash format uses).
+static bool eepromChecked = false, eepromPresent = false;
+static void ensureEepromChecked() {
+  if (eepromChecked) return;
+  eepromChecked = true;
+  eepromPresent = LzEeprom::probe(LZ_EEPROM_ADDR);
+}
+
 uint32_t LzStore::crc32(const void *data, uint32_t len) {
   const uint8_t *p = (const uint8_t *)data;
   uint32_t crc = 0xFFFFFFFFUL;
@@ -27,16 +43,39 @@ uint32_t LzStore::crc32(const void *data, uint32_t len) {
   return ~crc;
 }
 
+static bool loadFromEeprom(void *payload, uint16_t size, uint16_t version) {
+  ensureEepromChecked();
+  if (!eepromPresent) return false;
+  StoreHeader eh;
+  if (!LzEeprom::read(LZ_EEPROM_ADDR, 0, (uint8_t *)&eh, sizeof(eh))) return false;
+  if (eh.magic != STORE_MAGIC || eh.version != version || eh.size != size)
+    return false;
+  if (!LzEeprom::read(LZ_EEPROM_ADDR, sizeof(eh), (uint8_t *)payload, size))
+    return false;
+  uint32_t storedCrc = 0;
+  if (!LzEeprom::read(LZ_EEPROM_ADDR, sizeof(eh) + size, (uint8_t *)&storedCrc, 4))
+    return false;
+  return storedCrc == LzStore::crc32(payload, size);
+}
+
 bool LzStore::load(void *payload, uint16_t size, uint16_t version) {
   const StoreHeader *h = (const StoreHeader *)STORE_ADDR;
-  if (h->magic != STORE_MAGIC || h->version != version || h->size != size)
-    return false;
-  const uint8_t *body = (const uint8_t *)(STORE_ADDR + sizeof(StoreHeader));
-  uint32_t storedCrc = *(const uint32_t *)(body + size);
-  uint32_t calc = crc32((const void *)STORE_ADDR, sizeof(StoreHeader) + size);
-  if (storedCrc != calc) return false;
-  memcpy(payload, body, size);
-  return true;
+  bool flashValid = h->magic == STORE_MAGIC && h->version == version &&
+                    h->size == size;
+  if (flashValid) {
+    const uint8_t *body = (const uint8_t *)(STORE_ADDR + sizeof(StoreHeader));
+    uint32_t storedCrc = *(const uint32_t *)(body + size);
+    uint32_t calc = crc32((const void *)STORE_ADDR, sizeof(StoreHeader) + size);
+    flashValid = (storedCrc == calc);
+  }
+  if (flashValid) {
+    const uint8_t *body = (const uint8_t *)(STORE_ADDR + sizeof(StoreHeader));
+    memcpy(payload, body, size);
+    return true;
+  }
+  // Internal flash blank/corrupt (e.g. a fresh chip, or a version bump) —
+  // fall back to the EEPROM mirror, if one is present.
+  return loadFromEeprom(payload, size, version);
 }
 
 static bool programWords(uint32_t addr, const uint8_t *data, uint32_t len) {
@@ -82,5 +121,28 @@ bool LzStore::save(const void *payload, uint16_t size, uint16_t version) {
   // verify readback
   if (ok)
     ok = (memcmp((const void *)(STORE_ADDR + sizeof(h)), payload, size) == 0);
+
+  // Best-effort EEPROM mirror (spec 1) — only after internal flash (the
+  // authoritative copy) has already succeeded and verified. EEPROM absence
+  // or a mid-write failure here does NOT change the return value: the save
+  // already succeeded where it matters.
+  if (ok) {
+    ensureEepromChecked();
+    if (eepromPresent) {
+      StoreHeader eh{STORE_MAGIC, version, size};
+      uint32_t pcrc = crc32(payload, size);
+      bool eepOk = LzEeprom::write(LZ_EEPROM_ADDR, 0, (const uint8_t *)&eh,
+                                   sizeof(eh));
+      if (eepOk)
+        eepOk = LzEeprom::write(LZ_EEPROM_ADDR, sizeof(eh),
+                                (const uint8_t *)payload, size);
+      if (eepOk)
+        eepOk = LzEeprom::write(LZ_EEPROM_ADDR, sizeof(eh) + size,
+                                (const uint8_t *)&pcrc, 4);
+      (void)eepOk;  // mirror only; internal flash is what "save succeeded" means
+      IWatchdog.reload();
+    }
+  }
+
   return ok;
 }

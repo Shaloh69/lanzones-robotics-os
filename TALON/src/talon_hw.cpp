@@ -335,7 +335,7 @@ void runStart() {  // initial arm AND Quick Rematch: full state reset
   // edge sensors show FAIL in Sensor Health, refuse with an explanation.
   if (!expanderOk) {
     Buzzer.play(SND_ERROR);
-    Leds.red(LZLED_BLINK_FAST);
+    Leds.setState(LZLED_FAULT);
     Message.show("Cannot arm: edge", "sensors FAIL. Fix!");
     return;
   }
@@ -349,7 +349,7 @@ void runStart() {  // initial arm AND Quick Rematch: full state reset
   slipFlag = false;
   cmd.slipScalePct = 100;
   OS.setRunActive(true);
-  Leds.green(LZLED_BLINK_FAST);
+  Leds.setState(LZLED_ARMED);
   actionName = "COUNTDOWN";
 }
 
@@ -357,7 +357,7 @@ void runAbort(const char *reason) {
   rs = RS_IDLE;
   talonMotorsStop();
   OS.setRunActive(false);
-  Leds.green(LZLED_ON);
+  Leds.setState(LZLED_READY);
   snprintf(stopReason, sizeof(stopReason), "%s", reason);
   actionName = "IDLE";
 }
@@ -366,7 +366,7 @@ static void postMatch(const char *reason) {
   rs = RS_POSTMATCH;
   talonMotorsStop();
   OS.setRunActive(false);
-  Leds.green(LZLED_BLINK);
+  Leds.setState(LZLED_POSTMATCH);
   snprintf(stopReason, sizeof(stopReason), "%s", reason);
   actionName = "POST-MATCH";
   Buzzer.play(SND_MATCH_START);

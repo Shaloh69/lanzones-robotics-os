@@ -157,7 +157,7 @@ void vecStop(const char *reason) {
   mv = MV_NONE;
   driveOpen(0, 0);
   OS.setRunActive(false);
-  Leds.green(LZLED_ON);
+  Leds.setState(LZLED_READY);
   snprintf(stopReason, sizeof(stopReason), "%s", reason);
 }
 
@@ -190,7 +190,7 @@ void vecStart(VecMode m) {
     }
   }
   OS.setRunActive(true);
-  Leds.green(LZLED_BLINK_FAST);
+  Leds.setState(LZLED_ARMED);
   Buzzer.play(SND_MATCH_START);
 }
 

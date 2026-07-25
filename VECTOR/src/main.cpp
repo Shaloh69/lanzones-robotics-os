@@ -69,7 +69,7 @@ void setup() {
   OS.showSplash(logo_vector_road);  // two-frame splash (spec 1 + logos.h)
   vectorHwBegin();
   OS.push(&mainMenu);
-  Leds.green(LZLED_ON);  // ready/healthy at a glance
+  Leds.setState(LZLED_READY);  // ready/healthy at a glance
   Battery.setWarnVoltage(G.cur.warnVoltage);
   OS.setLocked(G.lockedFlag != 0);  // Lock Config persists (spec 1)
 }

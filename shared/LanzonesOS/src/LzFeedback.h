@@ -1,9 +1,14 @@
 // Copyright (c) 2026 Team Lanzones. Partnered by Koogs Robotics. All rights reserved.
 //
-// Buzzer (non-blocking pattern player), status LEDs, battery monitor.
+// Buzzer (non-blocking pattern player), status LED (single RGB), battery/
+// power monitor.
 #pragma once
+#include <Adafruit_INA219.h>
+#include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
+
 #include "LzConfig.h"
+#include "LzPins.h"
 
 // ---------------- Buzzer ----------------
 enum LzSound : uint8_t {
@@ -24,34 +29,59 @@ class LzBuzzer {
   bool active_ = false;
 };
 
-// ---------------- Status LEDs ----------------
-enum LzLedMode : uint8_t { LZLED_OFF, LZLED_ON, LZLED_BLINK, LZLED_BLINK_FAST };
+// ---------------- Status LED (single addressable RGB, spec 1) ------------
+// Replaces the old discrete green/red LEDs with one WS2812-style pixel and
+// a small priority-ordered state machine, since only one color shows at a
+// time: low-battery > fault > locked > base state > off. NeoPixel .show()
+// bit-bangs ~30us per pixel with interrupts briefly disabled — only called
+// when the resolved color actually changes (change-driven, like the OLED),
+// never per loop iteration.
+enum LzLedState : uint8_t {
+  LZLED_READY,      // solid green — idle/healthy
+  LZLED_ARMED,      // fast-blink green — countdown/running
+  LZLED_POSTMATCH,  // slow-blink amber — match ended, awaiting Quick Rematch
+  LZLED_FAULT,      // fast-blink red — refused to arm / hard error
+  LZLED_OFF,
+};
 
 class LzLeds {
  public:
   void begin();
-  void green(LzLedMode m) { g_ = m; }
-  void red(LzLedMode m) { r_ = m; }
+  void setState(LzLedState s) { state_ = s; }
+  void setLocked(bool l) { locked_ = l; }        // overlay: solid blue
+  void setLowBattery(bool low) { lowBatt_ = low; }  // overlay: pulsing red, top priority
   void tick(uint32_t now);
 
  private:
-  LzLedMode g_ = LZLED_OFF, r_ = LZLED_OFF;
-  static bool phase(LzLedMode m, uint32_t now);
+  Adafruit_NeoPixel pixel_{1, LZ_PIN_LED_RGB, NEO_GRB + NEO_KHZ800};
+  LzLedState state_ = LZLED_READY;
+  bool locked_ = false;
+  bool lowBatt_ = false;
+  uint32_t lastColor_ = 0xFFFFFFFF;  // change-driven: only push() when it differs
 };
 
-// ---------------- Battery ----------------
+// ---------------- Battery / power monitor (INA219, spec 1) ----------------
+// Replaces the old voltage-divider ADC read — shares the I2C bus, no pin
+// cost, and adds real current draw (used by Traction Control as a stronger
+// slip signal than the accelerometer-mismatch proxy alone).
 class LzBattery {
  public:
   void begin();
   void tick(uint32_t now);
+  bool present() const { return present_; }
   float voltage() const { return volts_; }
+  float currentMa() const { return currentMa_; }
+  float powerMw() const { return powerMw_; }
   int percent() const;              // -1 until first reading
   void setWarnVoltage(float v) { warnV_ = v; }
   float warnVoltage() const { return warnV_; }
   bool isLow() const { return low_; }
 
  private:
+  Adafruit_INA219 ina_{LZ_INA219_ADDR};
+  bool present_ = false;
   float volts_ = -1.0f;
+  float currentMa_ = 0, powerMw_ = 0;
   float warnV_ = 7.0f;
   bool low_ = false;
   uint32_t lastSample_ = 0;

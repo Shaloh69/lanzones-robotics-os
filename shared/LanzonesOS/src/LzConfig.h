@@ -18,10 +18,20 @@
 #define LZ_FASTSCROLL_EVERY  60    // ms between fast-scroll repeats
 #define LZ_HOLD_MS           1000  // hold-to-confirm gesture length
 
-// Battery. TODO (PCB): set the real divider ratio once the board is final.
-#define LZ_VBAT_DIVIDER      4.03f // PLACEHOLDER — voltage divider ratio on PB0
-#define LZ_VBAT_ADC_REF      3.3f
+// Battery: INA219 power monitor on the shared I2C bus (spec 1) — replaces
+// the old voltage-divider ADC read. No pin cost; shunt resistor value is a
+// PCB-level concern (sized for expected current draw), not a firmware one.
+#define LZ_INA219_ADDR       0x40  // PLACEHOLDER — INA219 A1A0 = 00
 #define LZ_VBAT_DEFAULT_MIN  6.6f  // 2S LiPo empty (assumption — adjust per pack)
 #define LZ_VBAT_DEFAULT_MAX  8.4f  // 2S LiPo full
+
+// External EEPROM (24LC256-class) on the shared I2C bus (spec 1) — mirrors
+// the internal-flash profile store for extra non-volatile headroom / less
+// flash wear from frequent saves. Internal flash remains authoritative;
+// EEPROM is a best-effort secondary copy, never required for correct
+// operation (an absent EEPROM just means no mirror, nothing else changes).
+#define LZ_EEPROM_ADDR       0x50  // PLACEHOLDER — 24LC256 A2A1A0 = 000
+#define LZ_EEPROM_PAGE_SIZE  64    // 24LC256 page size
+#define LZ_EEPROM_SIZE       32768 // 24LC256 = 256 kbit = 32 KB
 
 #define LZ_WATCHDOG_US       8000000  // 8 s IWDG — longer than worst-case flash erase

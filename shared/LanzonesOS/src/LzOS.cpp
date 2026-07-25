@@ -112,6 +112,11 @@ bool LzOS::editAllowed() {
   return false;
 }
 
+void LzOS::setLocked(bool l) {
+  locked_ = l;
+  Leds.setLocked(l);  // blue overlay (spec 1: color-coded states)
+}
+
 void LzOS::setRunActive(bool a) {
   lzStoreRunGuard = a;  // spec 6.1: no flash writes during RUN MODE
 }
@@ -137,12 +142,10 @@ void LzOS::tick() {
   if (top()) top()->onTick(now);
 
   Battery.tick(now);
-  if (Battery.isLow()) {
-    Leds.red(LZLED_BLINK);
-    if (now - lastLowBeep_ > 8000) {  // low-battery alarm, rate-limited
-      lastLowBeep_ = now;
-      Buzzer.play(SND_LOWBATT);
-    }
+  Leds.setLowBattery(Battery.isLow());  // clears too, once voltage recovers
+  if (Battery.isLow() && now - lastLowBeep_ > 8000) {  // rate-limited alarm
+    lastLowBeep_ = now;
+    Buzzer.play(SND_LOWBATT);
   }
 
   Buzzer.tick(now);

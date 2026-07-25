@@ -28,7 +28,7 @@ class LzOS {
 
   // Lock Config (spec 1.0): read-only CONFIGURE while locked.
   bool editAllowed();  // false (with error tone + message) when locked
-  void setLocked(bool l) { locked_ = l; }
+  void setLocked(bool l);  // also drives the status LED's blue overlay
   bool locked() const { return locked_; }
 
   // RUN MODE guard — also blocks flash writes via lzStoreRunGuard.

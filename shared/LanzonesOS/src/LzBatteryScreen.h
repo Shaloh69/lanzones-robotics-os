@@ -38,10 +38,16 @@ class LzBatteryScreen : public LzScreen {
 
   void draw(U8G2 &g) override {
     char b[26];
+    if (!Battery.present()) {
+      Display.bodyRow(1, "INA219: FAIL", false);
+      Display.bodyRow(2, "Check I2C wiring", false);
+      return;
+    }
     snprintf(b, sizeof(b), "%.2f V", (double)Battery.voltage());
     g.setFont(u8g2_font_9x15B_tr);
     g.drawStr((128 - g.getStrWidth(b)) / 2, Display.rowTop(1) + 6, b);
-    snprintf(b, sizeof(b), "Charge: ~%d%%", Battery.percent());
+    snprintf(b, sizeof(b), "Charge: ~%d%%  %dmA", Battery.percent(),
+             (int)Battery.currentMa());
     Display.bodyRow(2, b, false);
     snprintf(b, sizeof(b), "Warn below: %.1f V", (double)*warn_);
     Display.bodyRow(3, b, false);

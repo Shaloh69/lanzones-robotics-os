@@ -1,18 +1,28 @@
 // Copyright (c) 2026 Team Lanzones. Partnered by Koogs Robotics. All rights reserved.
 //
 // Shared "OS layer" pin assignments — spec section 1.2.
-// One deviation, agreed with the team 2026-07-26: the spec listed the status
-// LEDs on PC0/PC1, but those pins do not exist on the Black Pill's 48-pin
-// (UFQFPN48) package — only PC13/14/15 of port C are bonded out, all reserved.
-// LEDs moved to PB8 (green) / PB9 (red).
+// Deviation, agreed with the team 2026-07-26: the spec listed a single RGB
+// status LED on PC0, but that pin does not exist on the Black Pill's 48-pin
+// (UFQFPN48) package — only PC13/14/15 of port C are bonded out, all
+// reserved. Moved to PB8 (was previously "green LED" before the RGB
+// consolidation below).
+//
+// Hardware consolidation (spec 1.2, this pass): the two discrete status
+// LEDs collapsed into one WS2812-style addressable RGB LED (PB8, was
+// PB8/PB9 for green/red — PB9 is now free), and the voltage-divider battery
+// sense moved to an INA219 power monitor on the shared I2C bus, freeing
+// PB0. Net: this pass frees PB9 and PB0 for project-specific use (2 pins).
 //
 // Reserved pins (never route): PA9/PA10 (USART1 debug), PA11/PA12 (USB),
-// PA13/PA14 (SWD), PB2 (BOOT1), PC13 (onboard LED), PC14/PC15 (oscillator),
+// PA13/PA14 (SWD — also broken out to a debug-fallback header per spec 1),
+// PB2 (BOOT1), PC13 (onboard LED), PC14/PC15 (oscillator),
 // PA4-PA7 (WeAct SPI1 flash footprint).
 #pragma once
 #include <Arduino.h>
 
-// OLED — hardware I2C1, default mapping
+// OLED — hardware I2C1, default mapping. Also carries: IMU (TALON), INA219
+// power monitor, 24LC256 EEPROM, PCF8574 GPIO expander(s) (TALON) — all
+// I2C peripherals share this one bus, no extra pins per device.
 static const uint8_t LZ_PIN_OLED_SCL = PB6;
 static const uint8_t LZ_PIN_OLED_SDA = PB7;
 
@@ -24,9 +34,7 @@ static const uint8_t LZ_PIN_BTN_BACK   = PB15;
 static const uint8_t LZ_PIN_BTN_START  = PA0;  // also the WeAct onboard KEY button
 
 // Feedback
-static const uint8_t LZ_PIN_BUZZER    = PA1;   // TIM2_CH2-capable
-static const uint8_t LZ_PIN_LED_GREEN = PB8;   // was PC0 in spec — see header note
-static const uint8_t LZ_PIN_LED_RED   = PB9;   // was PC1 in spec — see header note
-
-// Battery voltage divider
-static const uint8_t LZ_PIN_VBAT = PB0;        // ADC1_IN8
+static const uint8_t LZ_PIN_BUZZER  = PA1;  // TIM2_CH2-capable
+static const uint8_t LZ_PIN_LED_RGB = PB8;  // single WS2812-style data pin
+// PB9 and PB0 are now free (see consolidation note above) — available for
+// project-specific sensors/motors in each project's pin_config.h.

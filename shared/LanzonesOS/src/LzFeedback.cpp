@@ -50,36 +50,49 @@ void LzBuzzer::tick(uint32_t now) {
   stepEnd_ = now + ms;
 }
 
-// ---------------- LEDs ----------------
+// ---------------- Status LED (single RGB) ----------------
 void LzLeds::begin() {
-  pinMode(LZ_PIN_LED_GREEN, OUTPUT);
-  pinMode(LZ_PIN_LED_RED, OUTPUT);
+  pixel_.begin();
+  pixel_.setBrightness(80);  // full 255 is eye-searing at close range
+  pixel_.show();             // off
 }
 
-bool LzLeds::phase(LzLedMode m, uint32_t now) {
-  switch (m) {
-    case LZLED_ON: return true;
-    case LZLED_BLINK: return (now / 400) & 1;
-    case LZLED_BLINK_FAST: return (now / 120) & 1;
-    default: return false;
+// resolves the priority-ordered state into an RGB color for `now`
+static uint32_t resolveColor(Adafruit_NeoPixel &px, LzLedState state,
+                            bool locked, bool lowBatt, uint32_t now) {
+  bool fastBlink = (now / 120) & 1;
+  bool slowBlink = (now / 400) & 1;
+  if (lowBatt) return fastBlink ? px.Color(255, 0, 0) : 0;       // top priority
+  if (state == LZLED_FAULT) return fastBlink ? px.Color(255, 0, 0) : 0;
+  if (locked) return px.Color(0, 0, 255);                        // solid blue
+  switch (state) {
+    case LZLED_READY:     return px.Color(0, 255, 0);            // solid green
+    case LZLED_ARMED:     return fastBlink ? px.Color(0, 255, 0) : 0;
+    case LZLED_POSTMATCH: return slowBlink ? px.Color(255, 140, 0) : 0;
+    default:              return 0;                               // OFF
   }
 }
 
 void LzLeds::tick(uint32_t now) {
-  digitalWrite(LZ_PIN_LED_GREEN, phase(g_, now) ? HIGH : LOW);
-  digitalWrite(LZ_PIN_LED_RED, phase(r_, now) ? HIGH : LOW);
+  uint32_t c = resolveColor(pixel_, state_, locked_, lowBatt_, now);
+  if (c == lastColor_) return;  // change-driven: skip the bit-bang write
+  lastColor_ = c;
+  pixel_.setPixelColor(0, c);
+  pixel_.show();
 }
 
-// ---------------- Battery ----------------
+// ---------------- Battery / power monitor (INA219) ----------------
 void LzBattery::begin() {
-  pinMode(LZ_PIN_VBAT, INPUT_ANALOG);
-  analogReadResolution(12);
+  present_ = ina_.begin();
+  if (present_) ina_.setCalibration_32V_2A();  // PLACEHOLDER: match shunt/PCB
 }
 
 void LzBattery::tick(uint32_t now) {
-  if (now - lastSample_ < 100) return;  // 10 Hz sampling is plenty
+  if (!present_ || now - lastSample_ < 100) return;  // 10 Hz sampling
   lastSample_ = now;
-  float v = analogRead(LZ_PIN_VBAT) * (LZ_VBAT_ADC_REF / 4095.0f) * LZ_VBAT_DIVIDER;
+  float v = ina_.getBusVoltage_V() + ina_.getShuntVoltage_mV() * 0.001f;
+  currentMa_ = ina_.getCurrent_mA();
+  powerMw_ = ina_.getPower_mW();
   volts_ = (volts_ < 0) ? v : (volts_ * 0.8f + v * 0.2f);  // EMA smoothing
   // hysteresis so the alarm doesn't chatter at the threshold
   if (!low_ && volts_ < warnV_) low_ = true;
