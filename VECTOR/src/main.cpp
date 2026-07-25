@@ -11,16 +11,17 @@
 
 #include "build_id.h"
 #include "pin_config.h"
+#include "vector_hw.h"
+#include "vector_model.h"
 
-// ---- placeholder settings (moved into the profile store in Step 3) ----
-static float gWarnVoltage = 7.0f;
-static void warnChanged() {}
+void openConfigure();  // vector_config.cpp
 
-// ---------------- placeholder for Step 3 features ----------------
-static void openTodo() { Message.show("Coming in Step 3", "Feature stub"); }
+// ---------------- placeholder for Step 3f features ----------------
+static void openTodo() { Message.show("Coming in Step 3f", "Feature stub"); }
 
 // ---------------- Battery ----------------
-static LzBatteryScreen batteryScreen(&gWarnVoltage, warnChanged);
+static void warnChanged() {}
+static LzBatteryScreen batteryScreen(&G.cur.warnVoltage, warnChanged);
 static void openBattery() { OS.push(&batteryScreen); }
 
 // ---------------- Help ----------------
@@ -56,7 +57,7 @@ static void lockValue(char *out, size_t n) {
 // ---------------- Main menu (spec 3.1) ----------------
 static const LzMenuItem MAIN_ITEMS[] = {
     {"RUN MODE", openTodo, nullptr},
-    {"CONFIGURE", openTodo, nullptr},
+    {"CONFIGURE", openConfigure, nullptr},
     {"SENSOR HEALTH", openTodo, nullptr},
     {"CALIBRATE", openTodo, nullptr},
     {"MOTOR TEST", openTodo, nullptr},
@@ -68,11 +69,16 @@ static LzMenuScreen mainMenu("MAIN", MAIN_ITEMS,
                              sizeof(MAIN_ITEMS) / sizeof(MAIN_ITEMS[0]));
 
 void setup() {
+  vectorLoad();  // flash image or defaults (before anything reads G)
   OS.begin("VECTOR", VECTOR_BUILD_ID);
   OS.showSplash();
+  vectorHwBegin();
   OS.push(&mainMenu);
   Leds.green(LZLED_ON);  // ready/healthy at a glance
-  Battery.setWarnVoltage(gWarnVoltage);
+  Battery.setWarnVoltage(G.cur.warnVoltage);
 }
 
-void loop() { OS.tick(); }  // non-blocking state machine — no delay() anywhere
+void loop() {  // non-blocking state machine — no delay() anywhere
+  OS.tick();
+  vectorHwTick(millis());
+}
