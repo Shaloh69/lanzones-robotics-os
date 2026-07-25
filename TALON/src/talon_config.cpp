@@ -4,6 +4,7 @@
 // Limits, Motor Config (spec 2.3), Strategy Builder (talon_strategy.cpp),
 // Profiles (Save As / Load / Delete), Save-all.
 #include <LzOS.h>
+#include <LzTransfer.h>
 #include <LzUi.h>
 
 #include "talon_hw.h"
@@ -152,8 +153,33 @@ static void profDel(uint8_t i) {
 static const LzSlotOps PROF_OPS = {
     profCount, profName, profOpen, profCreate, profDel,
     "+ Save As (new)", "Profile slots full"};
-static LzSlotListScreen profScreen("PROFILES", &PROF_OPS);
-static void openProfiles() { OS.push(&profScreen); }
+static LzSlotListScreen profSlots("SLOTS", &PROF_OPS);
+static void openProfSlots() { OS.push(&profSlots); }
+
+// ---- Config Export/Import via serial (spec 1), from the Profiles menu ----
+static TalonStore importStaging;  // verified fully before touching G
+static void onImported() {
+  G = importStaging;
+  talonMotorsReinit();
+  Battery.setWarnVoltage(G.cur.warnVoltage);
+  OS.setLocked(G.lockedFlag != 0);
+}
+static void openExport() {
+  Transfer.openExport("TALON", TALON_STORE_VERSION, &G, sizeof(G));
+}
+static void openImport() {
+  if (!OS.editAllowed()) return;  // imports change config
+  Transfer.openImport("TALON", TALON_STORE_VERSION, &importStaging,
+                      sizeof(importStaging), onImported);
+}
+
+static const LzMenuItem PROFILES_ITEMS[] = {
+    {"Profile Slots", openProfSlots, nullptr},
+    {"Export via Serial", openExport, nullptr},
+    {"Import via Serial", openImport, nullptr},
+};
+static LzMenuScreen profMenu("PROFILES", PROFILES_ITEMS, 3);
+static void openProfiles() { OS.push(&profMenu); }
 
 // ---------------- CONFIGURE menu ----------------
 static void saveAll() { talonSaveWithFeedback(); }

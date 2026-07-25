@@ -16,6 +16,7 @@ LzBattery Battery;
 void LzOS::begin(const char *name, const char *bid) {
   osName = name;
   buildId = bid;
+  Serial.begin(115200);  // USART1 PA9/PA10: debug + config export/import
   Buttons.begin();
   Display.begin();
   Buzzer.begin();
