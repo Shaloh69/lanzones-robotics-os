@@ -1,0 +1,7 @@
+{
+  "name": "LanzonesOS",
+  "version": "1.0.0",
+  "description": "Team Lanzones shared robot OS layer: OLED UI, buttons, storage, watchdog. Copyright (c) 2026 Team Lanzones. Partnered by Koogs Robotics. All rights reserved.",
+  "frameworks": "arduino",
+  "platforms": "ststm32"
+}
