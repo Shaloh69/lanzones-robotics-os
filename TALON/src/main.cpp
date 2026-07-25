@@ -14,30 +14,19 @@
 #include "talon_hw.h"
 #include "talon_model.h"
 
-void openConfigure();  // talon_config.cpp
-
-// ---------------- placeholder for Step 3c features ----------------
-static void openTodo() { Message.show("Coming in Step 3c", "Feature stub"); }
+// screens implemented across talon_*.cpp
+void openConfigure();
+void openRunMode();
+void openSensorHealth();
+void openCalibrate();
+void openMotorTest();
+void openOrientation();
+void openHelpScreen();
 
 // ---------------- Battery ----------------
 static void warnChanged() {}
 static LzBatteryScreen batteryScreen(&G.cur.warnVoltage, warnChanged);
 static void openBattery() { OS.push(&batteryScreen); }
-
-// ---------------- Help ----------------
-static const LzHelpEntry HELP_ENTRIES[] = {
-    {"About / Branding",
-     "TALON Sumobot OS\n" LZ_FW_VERSION "\n"
-     "Owned by\n Team Lanzones\nPartnered by\n Koogs Robotics\n"
-     "Build ID:\n " TALON_BUILD_ID},
-    {"Navigation Basics",
-     "UP/DOWN moves\nbetween items.\nSELECT opens or\nconfirms. BACK\n"
-     "exits without\nsaving. Hold\nSELECT or BACK\nfor 1 second to\n"
-     "confirm a delete."},
-};
-static LzHelpIndexScreen helpScreen(HELP_ENTRIES,
-                                    sizeof(HELP_ENTRIES) / sizeof(HELP_ENTRIES[0]));
-static void openHelp() { OS.push(&helpScreen); }
 
 // ---------------- Lock Config (spec 1.0) ----------------
 static void doUnlock() { OS.setLocked(false); }
@@ -56,14 +45,14 @@ static void lockValue(char *out, size_t n) {
 
 // ---------------- Main menu (spec 2.1) ----------------
 static const LzMenuItem MAIN_ITEMS[] = {
-    {"RUN MODE", openTodo, nullptr},
+    {"RUN MODE", openRunMode, nullptr},
     {"CONFIGURE", openConfigure, nullptr},
-    {"SENSOR HEALTH", openTodo, nullptr},
-    {"CALIBRATE", openTodo, nullptr},
-    {"MOTOR TEST", openTodo, nullptr},
-    {"ORIENTATION (IMU)", openTodo, nullptr},
+    {"SENSOR HEALTH", openSensorHealth, nullptr},
+    {"CALIBRATE", openCalibrate, nullptr},
+    {"MOTOR TEST", openMotorTest, nullptr},
+    {"ORIENTATION (IMU)", openOrientation, nullptr},
     {"BATTERY STATUS", openBattery, nullptr},
-    {"HELP", openHelp, nullptr},
+    {"HELP", openHelpScreen, nullptr},
     {"LOCK CONFIG", toggleLock, lockValue},
 };
 static LzMenuScreen mainMenu("MAIN", MAIN_ITEMS,
