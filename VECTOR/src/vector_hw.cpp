@@ -321,8 +321,13 @@ static void engineTick(uint32_t now) {
   int pos = linePosition();
   if (pos >= 0) lastGoodPos = pos;
 
-  // --- Finish Marker Detection (spec 3.1): double full-width bar ---------
-  if ((mode == VM_FOLLOW || mode == VM_SPEED) && mv == MV_NONE && finishArmed) {
+  // --- Finish Marker Detection (spec 3.1): double full-width bar.
+  // Configurable per-profile (Double-Line / Disabled) and applies to
+  // LEARN as well — a finish during the dry run ends it cleanly with the
+  // recorded path kept, instead of logging junk junctions at the line.
+  if (G.cur.finishMode == 0 &&
+      (mode == VM_FOLLOW || mode == VM_SPEED || mode == VM_LEARN) &&
+      mv == MV_NONE && finishArmed) {
     bool bar = fullBar();
     if (bar && !inBar) {
       inBar = true;
@@ -330,7 +335,7 @@ static void engineTick(uint32_t now) {
         barPulses = 1;
         barFirstAt = now;
       } else if (now - barFirstAt <= 800) {  // second bar in time = finish
-        vecStop("FINISH!");
+        vecStop(mode == VM_LEARN ? "LEARN FINISH" : "FINISH!");
         Buzzer.play(SND_CONFIRM);
         return;
       }

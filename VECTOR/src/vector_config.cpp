@@ -55,6 +55,15 @@ static void vLineMode(char *o, size_t n) {
   snprintf(o, n, "%s", G.cur.lineMode ? "W/B" : "B/W");
 }
 
+// ---------------- Finish detection (spec 3.1, per-profile) ----------------
+static const char *const FINISH_MODES[] = {"Double-Line", "Disabled"};
+static void editFinishMode() {
+  EnumEditor.open("Finish detect", FINISH_MODES, 2, &G.cur.finishMode);
+}
+static void vFinishMode(char *o, size_t n) {
+  snprintf(o, n, "%s", G.cur.finishMode ? "OFF" : "2-Line");
+}
+
 // ---------------- Closed loop ----------------
 static const char *const LOOP_MODES[] = {"Open-loop", "Encoders"};
 static void editLoopMode() {
@@ -157,6 +166,7 @@ static const LzMenuItem CFG_ITEMS[] = {
     {"PID Tuning", openPid, nullptr},
     {"Speed Profile", openSpeed, nullptr},
     {"Line color", editLineMode, vLineMode},
+    {"Finish detect", editFinishMode, vFinishMode},
     {"Speed control", editLoopMode, vLoopMode},
     {"Path Array Editor", openPathEditor, nullptr},
     {"Profiles", openProfiles, nullptr},

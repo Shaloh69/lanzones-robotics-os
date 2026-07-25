@@ -69,7 +69,9 @@ static const LzHelpEntry HELP[] = {
      "The finish line\nuses a distinct\npattern - a\nperpendicular\n"
      "DOUBLE line -\ndifferent from a\nnormal junction.\nSeeing both "
      "bars\nin quick\nsuccession stops\nthe robot\nautomatically\ninstead "
-     "of\ntreating it as\nanother turn."},
+     "of\ntreating it as\nanother turn.\nConfigure > Finish\ndetect "
+     "switches it\nDouble-Line or\nDisabled (saved\nper profile) and\nit "
+     "also ends Learn\nMode cleanly."},
     {"Config Exp/Import",
      "Copies a tuned\nsetup (including\nsaved path arrays)\nto another "
      "board\nover serial\n(PA9/PA10, 115200).\nExample: export\nTrackA_fast "

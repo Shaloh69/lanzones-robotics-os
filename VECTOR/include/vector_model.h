@@ -43,6 +43,9 @@ struct VectorTuning {
   uint8_t lineMode = 0;       // 0 = Black-on-white, 1 = White-on-black
   uint8_t closedLoop = 0;
   float warnVoltage = 7.0f;
+  // Finish Detection Mode (spec 3.1): 0 = Double-Line Marker, 1 = Disabled.
+  // Per-profile; applies to Learn Mode as well as Follow/Speed Run.
+  uint8_t finishMode = 0;
 };
 
 #define VEC_MAX_PROFILES 4
@@ -60,7 +63,7 @@ struct VectorStore {
   VecPath path;  // working path (Learn Mode writes here)
   VecProfile profiles[VEC_MAX_PROFILES];
 };
-#define VECTOR_STORE_VERSION 2  // v2: per-junction cfg + lock persistence
+#define VECTOR_STORE_VERSION 3  // v3: finish mode; older images load as defaults
 
 extern VectorStore G;
 
