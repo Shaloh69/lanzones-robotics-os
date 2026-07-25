@@ -56,7 +56,25 @@ static const LzHelpEntry HELP[] = {
     {"Lock Config",
      "Locks all\nConfigure screens\nso a stray press\ncannot change "
      "your\nsettings between\nruns. Example:\nenable right after\nyour "
-     "final practice\nrun, before the\ncompetition heat."},
+     "final practice\nrun, before the\ncompetition heat.\nSurvives power\n"
+     "cycles."},
+    {"Per-Junction Cfg",
+     "Beyond the turn\ndirection, each\njunction can have\nits own "
+     "Approach\nSpeed, Brake time,\nTurn Style, Post-\nTurn Speed and\n"
+     "Reacq Timeout.\nExample: long\nstraight into a\nsharp corner -\nhigh "
+     "approach,\nlong brake, Point-\nTurn, low post-\nturn speed. Unset\n"
+     "fields use the\nglobal profile.\nIn the editor:\nSELECT a "
+     "junction\nthen START opens\nits config."},
+    {"Finish Marker",
+     "The finish line\nuses a distinct\npattern - a\nperpendicular\n"
+     "DOUBLE line -\ndifferent from a\nnormal junction.\nSeeing both "
+     "bars\nin quick\nsuccession stops\nthe robot\nautomatically\ninstead "
+     "of\ntreating it as\nanother turn."},
+    {"Config Exp/Import",
+     "Copies a tuned\nsetup (including\nsaved path arrays)\nto another "
+     "board\nover serial\n(PA9/PA10, 115200).\nExample: export\nTrackA_fast "
+     "from\nyour main bot and\nimport it on the\nbackup unit from\nthe "
+     "Profiles menu."},
 };
 
 static LzHelpIndexScreen helpIndex(HELP, sizeof(HELP) / sizeof(HELP[0]));

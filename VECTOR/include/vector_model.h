@@ -9,11 +9,23 @@
 // ---------------- Path array (spec 3.2) ----------------
 enum PathStep : uint8_t { STEP_F, STEP_L, STEP_R, STEP_U, STEP_COUNT };
 extern const char *const STEP_NAMES[STEP_COUNT];  // "F","L","R","U"
+extern const char *const TURN_STYLE_NAMES[3];     // Default/Smooth-Arc/Point
+
+// Per-junction speed/turn configuration (spec 3.2). Zero fields fall back
+// to the global Speed Profile defaults.
+struct VecJcfg {
+  uint8_t approachPct = 0;  // cruise % on the segment INTO this junction
+  uint8_t brakeDs = 0;      // decel time x0.1s once the junction is seen
+  uint8_t turnStyle = 0;    // 0=default(point), 1=smooth-arc, 2=point-turn
+  uint8_t postPct = 0;      // speed % right after the turn (ramps back up)
+  uint16_t reacqMs = 0;     // line-reacquisition timeout; 0 = default
+};
 
 #define VEC_MAX_PATH 48
 struct VecPath {
   uint8_t len = 0;
   uint8_t steps[VEC_MAX_PATH] = {};
+  VecJcfg cfg[VEC_MAX_PATH];
 };
 
 // ---------------- IR calibration ----------------
@@ -43,11 +55,12 @@ struct VecProfile {
 
 struct VectorStore {
   VectorTuning cur;
+  uint8_t lockedFlag = 0;  // Lock Config persists across power cycles (spec 1)
   VecCal cal;
   VecPath path;  // working path (Learn Mode writes here)
   VecProfile profiles[VEC_MAX_PROFILES];
 };
-#define VECTOR_STORE_VERSION 1
+#define VECTOR_STORE_VERSION 2  // v2: per-junction cfg + lock persistence
 
 extern VectorStore G;
 

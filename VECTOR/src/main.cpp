@@ -27,12 +27,18 @@ static void warnChanged() {}
 static LzBatteryScreen batteryScreen(&G.cur.warnVoltage, warnChanged);
 static void openBattery() { OS.push(&batteryScreen); }
 
-// ---------------- Lock Config (spec 1.0) ----------------
-static void doUnlock() { OS.setLocked(false); }
+// ---------------- Lock Config (spec 1: persists across power cycles) ----
+static void doUnlock() {
+  OS.setLocked(false);
+  G.lockedFlag = 0;
+  vectorSaveWithFeedback();  // explicit action; persists the unlocked state
+}
 static void toggleLock() {
   if (!OS.locked()) {
     OS.setLocked(true);
+    G.lockedFlag = 1;
     Buzzer.play(SND_CONFIRM);
+    vectorSaveWithFeedback();  // survives a bench power-cycle (spec 1)
   } else {
     Confirm.open("Unlock config", doUnlock);  // explicit hold-gesture unlock
   }
@@ -64,6 +70,7 @@ void setup() {
   OS.push(&mainMenu);
   Leds.green(LZLED_ON);  // ready/healthy at a glance
   Battery.setWarnVoltage(G.cur.warnVoltage);
+  OS.setLocked(G.lockedFlag != 0);  // Lock Config persists (spec 1)
 }
 
 void loop() {  // non-blocking state machine — no delay() anywhere

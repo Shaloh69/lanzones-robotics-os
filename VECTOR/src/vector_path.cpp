@@ -9,6 +9,93 @@
 #include "vector_hw.h"
 #include "vector_model.h"
 
+// ---------------- Per-junction speed/turn config (spec 3.2) ----------------
+// Zero-valued fields fall back to the global Speed Profile defaults.
+static uint8_t cfgIdx = 0;
+static int16_t jTmp = 0;
+
+static void jApproachDone(bool ok) {
+  if (ok) G.path.cfg[cfgIdx].approachPct = (uint8_t)jTmp;
+}
+static void jBrakeDone(bool ok) {
+  if (ok) G.path.cfg[cfgIdx].brakeDs = (uint8_t)jTmp;
+}
+static void jPostDone(bool ok) {
+  if (ok) G.path.cfg[cfgIdx].postPct = (uint8_t)jTmp;
+}
+static void jReacqDone(bool ok) {
+  if (ok) G.path.cfg[cfgIdx].reacqMs = (uint16_t)jTmp;
+}
+
+class JunctionCfgScreen : public LzScreen {
+ public:
+  JunctionCfgScreen() : LzScreen("JCFG") {}
+  bool onEvent(const LzEvent &ev) override {
+    if ((ev.btn == BTN_UP || ev.btn == BTN_DOWN) &&
+        (ev.type == EV_PRESS || ev.type == EV_REPEAT)) {
+      if (ev.btn == BTN_UP)
+        sel_ = (sel_ == 0) ? 4 : (uint8_t)(sel_ - 1);
+      else
+        sel_ = (uint8_t)((sel_ + 1) % 5);
+      if (sel_ < top_) top_ = sel_;
+      if (sel_ >= (uint8_t)(top_ + 4)) top_ = (uint8_t)(sel_ - 3);
+      return true;
+    }
+    if (ev.btn != BTN_SELECT || ev.type != EV_PRESS) return false;
+    VecJcfg &c = G.path.cfg[cfgIdx];
+    switch (sel_) {
+      case 0:
+        jTmp = c.approachPct;
+        NumEditor.openI("Approach (0=def)", &jTmp, 0, 100, 5, "%", nullptr,
+                        jApproachDone);
+        break;
+      case 1:
+        jTmp = c.brakeDs;
+        NumEditor.openI("Brake x0.1s (0=off)", &jTmp, 0, 20, 1, nullptr,
+                        nullptr, jBrakeDone);
+        break;
+      case 2:
+        EnumEditor.open("Turn style", TURN_STYLE_NAMES, 3, &c.turnStyle);
+        break;
+      case 3:
+        jTmp = c.postPct;
+        NumEditor.openI("Post-turn (0=def)", &jTmp, 0, 100, 5, "%", nullptr,
+                        jPostDone);
+        break;
+      default:
+        jTmp = (int16_t)c.reacqMs;
+        NumEditor.openI("Reacq timeout", &jTmp, 0, 3000, 100, "ms", nullptr,
+                        jReacqDone);
+        break;
+    }
+    return true;
+  }
+  void draw(U8G2 &g) override {
+    (void)g;
+    VecJcfg &c = G.path.cfg[cfgIdx];
+    char rows[5][26];
+    if (c.approachPct) snprintf(rows[0], 26, "Approach: %d%%", c.approachPct);
+    else snprintf(rows[0], 26, "Approach: default");
+    if (c.brakeDs) snprintf(rows[1], 26, "Brake: %d.%ds", c.brakeDs / 10, c.brakeDs % 10);
+    else snprintf(rows[1], 26, "Brake: off");
+    snprintf(rows[2], 26, "Turn: %s", TURN_STYLE_NAMES[c.turnStyle < 3 ? c.turnStyle : 0]);
+    if (c.postPct) snprintf(rows[3], 26, "Post-turn: %d%%", c.postPct);
+    else snprintf(rows[3], 26, "Post-turn: default");
+    if (c.reacqMs) snprintf(rows[4], 26, "Reacq: %dms", c.reacqMs);
+    else snprintf(rows[4], 26, "Reacq: default");
+    for (uint8_t r = 0; r < 4; r++) {
+      uint8_t i = (uint8_t)(top_ + r);
+      if (i >= 5) break;
+      Display.bodyRow(r, rows[i], i == sel_);
+    }
+  }
+  const char *hint() override { return "SEL:Edit BK:Done"; }
+
+ private:
+  uint8_t sel_ = 0, top_ = 0;
+};
+static JunctionCfgScreen jcfgScreen;
+
 // ---------------- Review / Edit Array ----------------
 class PathEditScreen : public LzScreen {
  public:
@@ -20,7 +107,7 @@ class PathEditScreen : public LzScreen {
   bool onEvent(const LzEvent &ev) override;
   void draw(U8G2 &g) override;
   const char *hint() override {
-    return editing_ ? "UD:F/L/R/U SEL:OK BK:Undo"
+    return editing_ ? "UD:FLRU SEL:OK ST:Cfg"
                     : "SEL:Edit ST:Ins Hold:Del";
   }
 
@@ -61,6 +148,11 @@ bool PathEditScreen::onEvent(const LzEvent &ev) {
     }
     if (ev.btn == BTN_BACK && ev.type == EV_PRESS) {  // cancel edit
       editing_ = false;
+      return true;
+    }
+    if (ev.btn == BTN_START && ev.type == EV_PRESS) {  // per-junction config
+      cfgIdx = sel_;
+      OS.push(&jcfgScreen);
       return true;
     }
     return true;  // swallow everything else while editing
@@ -141,8 +233,12 @@ void PathEditScreen::draw(U8G2 &g) {
       snprintf(b, sizeof(b), "Junction %d: <%s>", i + 1,
                STEP_NAMES[editVal_]);
     } else {
-      snprintf(b, sizeof(b), "Junction %d: %s", i + 1,
-               STEP_NAMES[G.path.steps[i]]);
+      // '+' marks junctions carrying speed/turn overrides (spec 3.2)
+      VecJcfg &c = G.path.cfg[i];
+      bool tuned = c.approachPct || c.brakeDs || c.turnStyle || c.postPct ||
+                   c.reacqMs;
+      snprintf(b, sizeof(b), "Junction %d: %s%s", i + 1,
+               STEP_NAMES[G.path.steps[i]], tuned ? " +" : "");
     }
     Display.bodyRow(r, b, i == sel_);
   }

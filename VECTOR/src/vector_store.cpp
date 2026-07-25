@@ -8,6 +8,7 @@
 VectorStore G;
 
 const char *const STEP_NAMES[STEP_COUNT] = {"F", "L", "R", "U"};
+const char *const TURN_STYLE_NAMES[3] = {"Default", "SmoothArc", "PointTurn"};
 
 void vectorDefaults() {
   G = VectorStore();
