@@ -2,7 +2,7 @@
 //
 // Flash persistence for profiles/strategies/path arrays (spec 1.0 "Storage").
 // One versioned, CRC-protected image in the last 128 KB flash sector
-// (sector 7 @ 0x08060000 on STM32F401CE — far above the firmware).
+// (sector 7 @ 0x08060000 on STM32F411CE — far above the firmware).
 //
 // Wear/reliability rules (spec 6.1/6.2):
 //  - save() is only called from explicit Save/confirm actions in CONFIGURE —

@@ -115,7 +115,7 @@ Both robots boot through a two-frame logo splash into the same UI system:
 
 ## Hardware
 
-WeAct Black Pill V3.0 (**STM32F401CE**), Arduino framework on PlatformIO.
+WeAct Black Pill V3.0 (**STM32F411CE**), Arduino framework on PlatformIO.
 
 Shared OS-layer pins (spec §1.2): OLED on I2C1 (PB6/PB7), buttons UP/DOWN/
 SELECT/BACK on PB12–PB15, START/STOP on PA0, buzzer PA1, status LEDs PB8/PB9,

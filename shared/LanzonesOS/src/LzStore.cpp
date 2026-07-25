@@ -6,7 +6,7 @@
 
 volatile bool lzStoreRunGuard = false;
 
-static const uint32_t STORE_ADDR = 0x08060000UL;  // F401CE sector 7 (128 KB)
+static const uint32_t STORE_ADDR = 0x08060000UL;  // F411CE sector 7 (128 KB)
 static const uint32_t STORE_SECTOR = FLASH_SECTOR_7;
 
 struct StoreHeader {
