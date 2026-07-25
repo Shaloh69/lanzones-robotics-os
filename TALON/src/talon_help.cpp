@@ -61,7 +61,57 @@ static const LzHelpEntry HELP[] = {
     {"Lock Config",
      "Locks all\nConfigure screens\nso a stray press\ncannot change "
      "your\nsettings between\nmatches. Example:\nenable right after\nyour "
-     "final practice\nrun, before\nwalking to the\ndohyo."},
+     "final practice\nrun, before\nwalking to the\ndohyo. Survives\npower "
+     "cycles."},
+    {"Traction Control",
+     "Detects wheels\nspinning without\nmoving the robot -\nusually a hard\n"
+     "push against a\nheavier opponent.\nExample: Response\n= Reduce Power:\n"
+     "on slip mid-attack\nthe bot briefly\neases throttle to\nregain grip\n"
+     "instead of\ngrinding wheels."},
+    {"Ramp-Up/Ramp-Down",
+     "Instead of\nsnapping to full\nspeed on attack\n(which spins the\n"
+     "wheels on launch),\nRamp-Up builds\nspeed gradually.\nExample: 300ms\n"
+     "Ramp-Up on a\nStraight Ram for a\ncleaner, more\ncontrolled charge."},
+    {"Search Radius",
+     "How tight or wide\nyour search arcs.\nExample: Radius 0\nspins in "
+     "place\n(cramped dohyo\ncenter); higher\nradius sweeps a\nwider arc "
+     "(better\nfor open ring\nspace). Spin=0 and\nSweep=wide are\npresets "
+     "on the\nsame dial."},
+    {"Crawl",
+     "A slow, cautious\nforward creep -\ndistinct from a\nfull charge.\n"
+     "Example: Crawl\nnear a suspected\nboundary to probe\ncarefully, or "
+     "to\nbait an opponent\ninto revealing its\nposition before\n"
+     "committing."},
+    {"Angled Turn",
+     "Turns to a precise\nangle instead of a\nfull spin or fixed\n90. "
+     "Example: 45\ndeg Clockwise sets\na specific attack\nangle against a\n"
+     "partially-detected\nopponent without\novershooting."},
+    {"Sensor Ignore Win",
+     "After a sharp turn\nsensors can give\nfalse readings\nwhile the "
+     "chassis\nrotates. Pick\nwhich sensors are\nmuted for a short\nwindow "
+     "at phase\nstart. Example:\nFront ToF only,\n200ms, on an "
+     "Angled\nTurn - the front\nis ignored during\nthe turn, angled\n"
+     "sensors stay live."},
+    {"Edge Escape",
+     "Whole-strategy\nsafety: any edge\ntrip interrupts\nthe current "
+     "phase\nand runs your\nescape maneuver,\nthen your resume\nchoice. "
+     "Example:\nBackup+Turn then\nFall Back to\nSearch. Only a\nphase's "
+     "ignore\nwindow with Edge\nsensors listed can\nsuppress it, and\nonly "
+     "for that\nwindow."},
+    {"Match Timer/Boost",
+     "Many rulesets give\nthe win to the\nmost aggressive\nbot if time "
+     "runs\nout. Example:\nboost threshold =\nlast 20s - with no\nclear "
+     "win by then\nthe bot jumps to\nyour Boost Target\nPhase (e.g. a "
+     "max\ncommitment Ram)\ninstead of waiting\nout the clock."},
+    {"Quick Rematch",
+     "A round often has\nmultiple bouts.\nAfter MATCH OVER,\npress START "
+     "on the\nRun screen to\nreset state and\nre-arm the 5s\ncountdown - "
+     "no\nmenu backtracking\nbetween bouts."},
+    {"Config Exp/Import",
+     "Copies a tuned\nsetup to another\nboard over serial\n(PA9/PA10, "
+     "115200)\ninstead of\nre-tuning. Example:\nexport vs_HeavyBot\nfrom "
+     "your main bot\nand import it on\nthe backup unit\nfrom the "
+     "Profiles\nmenu."},
 };
 
 static LzHelpIndexScreen helpIndex(HELP, sizeof(HELP) / sizeof(HELP[0]));
