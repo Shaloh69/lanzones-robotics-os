@@ -39,10 +39,10 @@ class LzNumEditor : public LzScreen {
   LzNumEditor() : LzScreen("EDIT") {}
   void openF(const char *label, float *v, float mn, float mx, float step,
              uint8_t decimals, const char *unit = nullptr,
-             void (*onTest)() = nullptr);
+             void (*onTest)() = nullptr, void (*onDone)(bool saved) = nullptr);
   void openI(const char *label, int16_t *v, int16_t mn, int16_t mx,
              int16_t step, const char *unit = nullptr,
-             void (*onTest)() = nullptr);
+             void (*onTest)() = nullptr, void (*onDone)(bool saved) = nullptr);
   bool onEvent(const LzEvent &ev) override;
   void draw(U8G2 &g) override;
   const char *hint() override;
@@ -52,6 +52,7 @@ class LzNumEditor : public LzScreen {
   const char *label_ = "";
   const char *unit_ = nullptr;
   void (*onTest_)() = nullptr;
+  void (*onDone_)(bool) = nullptr;
   bool isFloat_ = true;
   float *fp_ = nullptr, fMin_ = 0, fMax_ = 0, fStep_ = 0, fVal_ = 0;
   int16_t *ip_ = nullptr, iMin_ = 0, iMax_ = 0, iStep_ = 0, iVal_ = 0;

@@ -46,18 +46,19 @@ void LzMenuScreen::draw(U8G2 &g) {
 // ---------------- Numeric editor ----------------
 void LzNumEditor::openF(const char *label, float *v, float mn, float mx,
                         float step, uint8_t decimals, const char *unit,
-                        void (*onTest)()) {
+                        void (*onTest)(), void (*onDone)(bool)) {
   if (!OS.editAllowed()) return;  // Lock Config enforcement
-  label_ = label; unit_ = unit; onTest_ = onTest;
+  label_ = label; unit_ = unit; onTest_ = onTest; onDone_ = onDone;
   isFloat_ = true; fp_ = v; fMin_ = mn; fMax_ = mx; fStep_ = step;
   fVal_ = *v; dec_ = decimals;
   OS.push(this);
 }
 
 void LzNumEditor::openI(const char *label, int16_t *v, int16_t mn, int16_t mx,
-                        int16_t step, const char *unit, void (*onTest)()) {
+                        int16_t step, const char *unit, void (*onTest)(),
+                        void (*onDone)(bool)) {
   if (!OS.editAllowed()) return;
-  label_ = label; unit_ = unit; onTest_ = onTest;
+  label_ = label; unit_ = unit; onTest_ = onTest; onDone_ = onDone;
   isFloat_ = false; ip_ = v; iMin_ = mn; iMax_ = mx; iStep_ = step;
   iVal_ = *v; dec_ = 0;
   OS.push(this);
@@ -86,10 +87,12 @@ bool LzNumEditor::onEvent(const LzEvent &ev) {
     if (isFloat_) *fp_ = fVal_; else *ip_ = iVal_;
     Buzzer.play(SND_CONFIRM);
     OS.pop();
+    if (onDone_) onDone_(true);
     return true;
   }
   if (ev.btn == BTN_BACK && ev.type == EV_PRESS) {  // cancel
     OS.pop();
+    if (onDone_) onDone_(false);
     return true;
   }
   if (ev.btn == BTN_START && ev.type == EV_PRESS && onTest_) {
