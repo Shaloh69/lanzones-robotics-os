@@ -34,6 +34,8 @@ LzEncoder encL, encR;
 TofState tofState[5];
 bool edgeL = false, edgeR = false;
 bool expanderOk = false;
+bool bumpContact = false;
+bool expander2Ok = false;
 ImuState imu;
 
 static VL53L1X tof[5];
@@ -74,6 +76,57 @@ static bool expanderRead(uint8_t &val) {
   if (Wire.requestFrom((int)TALON_EXPANDER_ADDR, 1) != 1) return false;
   val = (uint8_t)Wire.read();
   return true;
+}
+
+// ---------------- PCF8574 #2: physical strategy-select switch -----------
+static bool expander2Write(uint8_t val) {
+  Wire.beginTransmission(TALON_EXPANDER2_ADDR);
+  Wire.write(val);
+  return Wire.endTransmission() == 0;
+}
+
+static bool expander2Read(uint8_t &val) {
+  if (Wire.requestFrom((int)TALON_EXPANDER2_ADDR, 1) != 1) return false;
+  val = (uint8_t)Wire.read();
+  return true;
+}
+
+// Polls a DIP/rotary switch on expander #2's P0-P2 (3-bit position, 0-7)
+// and maps it directly to the Nth USED strategy slot. Debounced for
+// mechanical switch bounce; only sampled while idle/post-match — a
+// physical flick can never change the active strategy mid-match. Raw bits
+// are read as the position value as-is; adjust the decode once the actual
+// switch part (DIP vs. rotary, active-high vs. active-low) is chosen.
+static void stratSwitchTick(uint32_t now) {
+  if (!expander2Ok) return;
+  RunState rs = runState();
+  if (rs != RS_IDLE && rs != RS_POSTMATCH) return;  // never mid-match
+  static uint32_t lastPoll = 0, candT0 = 0;
+  static uint8_t candidate = 0xFF, stable = 0xFF;
+  if (now - lastPoll < 100) return;  // 10 Hz — plenty for a mechanical switch
+  lastPoll = now;
+  uint8_t v;
+  if (!expander2Read(v)) return;
+  uint8_t pos = v & 0x07;
+  if (pos != candidate) {
+    candidate = pos;
+    candT0 = now;
+  } else if (now - candT0 >= 50 && pos != stable) {  // 50 ms debounce
+    stable = pos;
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < TALON_MAX_STRATEGIES; i++) {
+      if (!G.strategies[i].used) continue;
+      if (n == stable) {
+        if (G.cur.activeStrategy != i) {
+          G.cur.activeStrategy = i;  // RAM only — persists on next Save
+          Buzzer.play(SND_CLICK);
+          OS.requestRedraw();
+        }
+        break;
+      }
+      n++;
+    }
+  }
 }
 
 static void expanderSetXshut(uint8_t idx, bool high) {
@@ -168,6 +221,11 @@ static void sensorsUpdate(uint32_t now) {
       // Edge Polarity setting (spec Edge Calibration): 0=Active-High
       edgeL = G.cur.edgePolarity ? !rawL : rawL;
       edgeR = G.cur.edgePolarity ? !rawR : rawR;
+      // Bump/contact microswitch (this pass, P7): assumed a normally-open
+      // switch shorting to GND on contact (active-low) — no separate
+      // polarity setting exists for this yet; flip here if the physical
+      // switch is wired the other way.
+      bumpContact = (v & (1 << 7)) == 0;
     }
   }
   imuUpdate(now);
@@ -236,6 +294,7 @@ void talonHwBegin() {
   encL.begin(PIN_ENC_L_A, PIN_ENC_L_B);
   encR.begin(PIN_ENC_R_A, PIN_ENC_R_B);
   tofInitAll();
+  expander2Ok = expander2Write(0xFF);  // all-input mode (strategy switch)
   // /INT is open-drain, active-low; a change on any expander input
   // asserts it until we read the port back.
   pinMode(PIN_EXPANDER_INT, INPUT_PULLUP);
@@ -622,11 +681,14 @@ static void engineTick(uint32_t now) {
 
   // --- give-up safety timer (uses masked distance: trigger-class logic)
   int dist = opponentDistMasked(mask);
+  bool bumpTrig = bumpContact && !(mask & IGN_CONTACT);
   if (dist > 0 && (bestDist < 0 || dist < bestDist - 50)) {
     bestDist = dist;
     giveUpT0 = now;
   }
   if (imu.impact && phaseIsAttack(p.type)) giveUpT0 = now;
+  // physical contact is unambiguous progress — resets give-up same as impact
+  if (bumpTrig && phaseIsAttack(p.type)) giveUpT0 = now;
   if (!givingUp && phaseIsAttack(p.type) &&
       (now - giveUpT0) > (uint32_t)s.giveUpDs * 100) {
     givingUp = true;
@@ -654,6 +716,9 @@ static void engineTick(uint32_t now) {
       break;
     case TR_EDGE:
       break;  // handled above
+    case TR_CONTACT:
+      advance = bumpTrig;
+      break;
   }
   // Angled Turn with a Time trigger: duration counts AFTER the turn finishes
   if (p.type == PH_ANGLED_TURN && p.trigger == TR_TIME && !angleDone)
@@ -666,6 +731,7 @@ static void engineTick(uint32_t now) {
 
 void talonHwTick(uint32_t now) {
   sensorsUpdate(now);
+  stratSwitchTick(now);
   engineTick(now);
   if (pulsing && (int32_t)(now - pulseEnd) >= 0) talonMotorsStop();
 }

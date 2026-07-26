@@ -22,7 +22,9 @@ enum PhaseType : uint8_t {
   PH_ANGLED_TURN,    // precise angle + direction (addendum 1.5)
   PH_TYPE_COUNT
 };
-enum PhaseTrigger : uint8_t { TR_TIME, TR_OPPONENT, TR_EDGE, TR_COUNT };
+// TR_CONTACT (spec, this pass): the front bumper microswitch — a genuine
+// "contact made" confirmation, distinct from ToF proximity.
+enum PhaseTrigger : uint8_t { TR_TIME, TR_OPPONENT, TR_EDGE, TR_CONTACT, TR_COUNT };
 
 static inline bool phaseIsAttack(uint8_t t) {
   return t >= PH_ATT_RAM && t <= PH_ATT_SIDE;
@@ -42,7 +44,7 @@ extern const char *const PHASE_TRIG_NAMES[TR_COUNT];
 extern const char *const RETREAT_NAMES[3];
 extern const char *const RESUME_NAMES[3];     // Edge Escape resume behavior
 extern const char *const SLIP_RESP_NAMES[3];  // traction response
-extern const char *const IGN_SENSOR_NAMES[7]; // ignore-window multi-select
+extern const char *const IGN_SENSOR_NAMES[8]; // ignore-window multi-select
 
 // ---------------- Sensor Ignore Window mask (addendum 1.6) ----------------
 enum : uint8_t {
@@ -53,6 +55,7 @@ enum : uint8_t {
   IGN_TOF_WR    = 1 << 4,  // Wide-Right ToF
   IGN_EDGE_L    = 1 << 5,
   IGN_EDGE_R    = 1 << 6,
+  IGN_CONTACT   = 1 << 7,  // bump/contact microswitch (this pass)
 };
 // ToF array index (0=Wide-L,1=Angled-L,2=Front,3=Angled-R,4=Wide-R) -> bit
 extern const uint8_t TOF_IGN_BIT[5];

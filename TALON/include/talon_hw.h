@@ -18,8 +18,10 @@ struct TofState {
 };
 // index: 0=Wide-L, 1=Angled-L, 2=Front, 3=Angled-R, 4=Wide-R
 extern TofState tofState[5];
-extern bool edgeL, edgeR;        // digital edge state (expander P5/P6)
-extern bool expanderOk;          // PCF8574 responded at boot
+extern bool edgeL, edgeR;        // digital edge state (expander #1 P5/P6)
+extern bool expanderOk;          // PCF8574 #1 responded at boot
+extern bool bumpContact;         // front bumper microswitch (expander #1 P7)
+extern bool expander2Ok;         // PCF8574 #2 (strategy switch) responded
 
 struct ImuState {
   bool present = false;

@@ -28,24 +28,27 @@ static const LzHelpEntry HELP[] = {
      "Attack until\nopponent detected\nPhase 3 = Straight\nRam until edge\n"
      "detected."},
     {"Transition Trigger",
-     "Each phase ends\none of three ways:\nafter a fixed\nTime, once the\n"
-     "opponent is\nDetected, or once\nan Edge is seen.\nExample: a Sweep\n"
-     "phase set to\nUntil-opponent\nkeeps spinning in\nplace until a ToF\n"
-     "sensor sees\nsomething in\nrange."},
+     "Each phase ends\none of four ways:\nafter a fixed\nTime, once the\n"
+     "opponent is\nDetected, once an\nEdge is seen, or\non Contact (the\n"
+     "bumper switch).\nExample: a Sweep\nphase set to\nUntil-opponent\n"
+     "keeps spinning in\nplace until a ToF\nsensor sees\nsomething in "
+     "range."},
     {"Give-Up Timer",
      "If your strategy\nis not gaining\nground, this\nsafety timer\nforces "
      "a Retreat\ninstead of\nstalling into a\nloss. Example: set\nto 4.0s - "
      "if 4s\npass in an ATTACK\nphase with no\ndistance decrease\nor push "
      "impact,\nthe bot switches\nto your chosen\nRetreat."},
     {"Sensor Health",
-     "Shows live reads\nfor all 7 sensors\n(5 ToF + 2 edge).\nPASS means "
-     "the\nsensor responded\nwith a valid value\nthis cycle; FAIL\nmeans it "
-     "timed out\nor returned zero -\ncheck wiring\nbefore your match."},
+     "Shows live reads\nfor all 8 sensors\n(5 ToF + 2 edge +\n1 bump). PASS "
+     "means\nthe sensor\nresponded with a\nvalid value this\ncycle; FAIL "
+     "means it\ntimed out or the\nI2C expander\ndidn't answer -\ncheck "
+     "wiring before\nyour match."},
     {"Calibration",
-     "Edge Threshold\nWizard: place the\nbot on the white\nline when "
-     "asked,\nthen on the dark\nclay; it computes\nthe cutoff.\nExample: "
-     "white 850\ndark 120 puts the\nthreshold at ~485.\nToF Zero: confirm\n"
-     "accuracy against\na 100mm target."},
+     "Edge Verification\nCheck: place the\nbot on the white\nboundary, "
+     "confirm\nboth sensors TRIP;\nthen on dark clay,\nconfirm both "
+     "CLEAR.\nIf backwards, flip\nEdge Polarity\n(Active-High/Low).\nThe "
+     "actual\nthreshold lives on\nthe module's trim\npot. ToF Zero:\n"
+     "confirm accuracy\nagainst a 100mm\ntarget."},
     {"Orientation (IMU)",
      "Detects tilt or\nflip. Example:\nwith Auto-Stop on\nFlip enabled, if\n"
      "the bot gets\nflipped in a match\nthe motors cut\nimmediately "
@@ -108,6 +111,17 @@ static const LzHelpEntry HELP[] = {
      "A round often has\nmultiple bouts.\nAfter MATCH OVER,\npress START "
      "on the\nRun screen to\nreset state and\nre-arm the 5s\ncountdown - "
      "no\nmenu backtracking\nbetween bouts."},
+    {"Bump Sensor",
+     "The front bumper\nmicroswitch\nconfirms actual\nphysical contact,\n"
+     "not just nearby\nproximity like the\nToF sensors.\nExample: set a "
+     "Ram\nphase's trigger to\nContact instead of\nOpponent so it\ncommits "
+     "until it\ntruly connects,\nnot just gets\nclose."},
+    {"Strategy Switch",
+     "A physical DIP or\nrotary switch lets\nyou pick a saved\nstrategy by "
+     "flipping\na switch instead\nof the OLED menu -\nhandy for quick\n"
+     "swaps between\nbouts. It only\ntakes effect while\nidle or after a\n"
+     "match - never\nmid-fight - and\nonly changes which\nsaved strategy "
+     "runs\nnext, not its\nsettings."},
     {"Config Exp/Import",
      "Copies a tuned\nsetup to another\nboard over serial\n(PA9/PA10, "
      "115200)\ninstead of\nre-tuning. Example:\nexport vs_HeavyBot\nfrom "

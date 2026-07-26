@@ -122,7 +122,7 @@ class SensorHealthScreen : public LzScreen {
   bool onEvent(const LzEvent &ev) override {
     if (ev.type != EV_PRESS && ev.type != EV_REPEAT) return false;
     if (ev.btn == BTN_UP && top_ > 0) top_--;
-    else if (ev.btn == BTN_DOWN && top_ < 3) top_++;
+    else if (ev.btn == BTN_DOWN && top_ < 4) top_++;  // 8 rows, window of 4
     else return false;
     return true;
   }
@@ -147,8 +147,11 @@ class SensorHealthScreen : public LzScreen {
       } else if (i == 5) {
         snprintf(b, sizeof(b), "EdgeL %s %s", edgeL ? "TRIP " : "clear",
                  expanderOk ? "PASS" : "FAIL");
-      } else {
+      } else if (i == 6) {
         snprintf(b, sizeof(b), "EdgeR %s %s", edgeR ? "TRIP " : "clear",
+                 expanderOk ? "PASS" : "FAIL");
+      } else {
+        snprintf(b, sizeof(b), "Bump  %s %s", bumpContact ? "TRIP " : "clear",
                  expanderOk ? "PASS" : "FAIL");
       }
       Display.bodyRow(r, b, false);

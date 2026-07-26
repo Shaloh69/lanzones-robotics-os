@@ -27,9 +27,9 @@ class IgnoreSensorsScreen : public LzScreen {
     if ((ev.btn == BTN_UP || ev.btn == BTN_DOWN) &&
         (ev.type == EV_PRESS || ev.type == EV_REPEAT)) {
       if (ev.btn == BTN_UP)
-        sel_ = (sel_ == 0) ? 6 : (uint8_t)(sel_ - 1);
+        sel_ = (sel_ == 0) ? 7 : (uint8_t)(sel_ - 1);
       else
-        sel_ = (uint8_t)((sel_ + 1) % 7);
+        sel_ = (uint8_t)((sel_ + 1) % 8);
       if (sel_ < top_) top_ = sel_;
       if (sel_ >= (uint8_t)(top_ + 4)) top_ = (uint8_t)(sel_ - 3);
       return true;
@@ -45,7 +45,7 @@ class IgnoreSensorsScreen : public LzScreen {
     (void)g;
     for (uint8_t r = 0; r < 4; r++) {
       uint8_t i = (uint8_t)(top_ + r);
-      if (i >= 7) break;
+      if (i >= 8) break;
       char b[26];
       snprintf(b, sizeof(b), "[%c] %s",
                (work.phases[phaseIdx].ignoreMask & (1 << i)) ? 'x' : ' ',
