@@ -22,7 +22,7 @@ laptop, no excuses.
 | | **TALON** — Sumobot OS | **VECTOR** — Line Follower OS |
 |---|---|---|
 | Mission | Push the other robot out of the dohyo | Solve the maze, then speed-run it |
-| Eyes | 5x VL53L1X laser ToF (wide-L/angled-L/front/angled-R/wide-R) + 2 boundary edge sensors + IMU | 8x IR reflectance array via CD4051 mux |
+| Eyes | 5x ToF/analog IR opponent sensors + 2 edge sensors + IMU (via I2C GPIO expander) — practical ceiling given the F411's pin budget, not a fixed requirement. Sensor type is interchangeable (e.g., Sharp analog IR instead of VL53L1X ToF); going beyond this count needs a second expander. | 8x IR reflectance sensors via CD4051 mux — the max a single mux supports; more needs a second CD4051. Sensor type is swappable as long as it stays mux-compatible analog output. |
 | Signature feature | **Strategy Builder** — named, phased battle playbooks | **Path Array Editor** — record, hand-edit, and replay F/L/R/U routes |
 | Folder | [`TALON/`](TALON/) | [`VECTOR/`](VECTOR/) |
 
@@ -58,6 +58,12 @@ Layered on top, because matches are chaos:
   touching a menu.
 - **Safety interlock:** RUN MODE refuses to arm if the edge sensors are dead.
   A robot that can't see the boundary doesn't get to fight.
+- **Contact trigger** — a front bumper microswitch confirms actual physical
+  contact, not just ToF proximity; usable as a fourth phase trigger
+  alongside Time/Opponent/Edge.
+- **Physical strategy switch** — a DIP/rotary selector picks a saved
+  strategy by flipping a switch instead of the OLED menu, for fast swaps
+  between bouts. Only sampled while idle or post-match, never mid-fight.
 
 ## What makes VECTOR interesting
 
@@ -110,22 +116,38 @@ Both robots boot through a two-frame logo splash into the same UI system:
 - **An independent watchdog (8 s)** reboots a hung robot mid-match — because
   you can't press reset from outside the dohyo.
 - **Pin-crunch solved properly:** the 48-pin STM32 ran out of GPIOs, so
-  VECTOR's IR array runs through a CD4051 mux and TALON's ToF-XSHUT/edge
-  lines through a PCF8574 expander with interrupt-driven edge reads.
+  VECTOR's IR array runs through a CD4051 mux and TALON's ToF-XSHUT/edge/
+  bump lines through a PCF8574 expander with interrupt-driven edge reads
+  (sub-millisecond reaction, not a 35ms polling penalty).
+- **Status and power monitoring ride the same I2C bus as everything else** —
+  one WS2812 RGB pixel replaces two discrete LEDs with a color-coded state
+  machine (green/armed-blink/amber/red/blue), and an INA219 power monitor
+  replaces the voltage-divider ADC read, adding real current draw for free.
+  Neither costs a GPIO.
+- **Flash gets a second opinion.** An external EEPROM mirrors every
+  successful save as a best-effort secondary copy; internal flash stays
+  authoritative and an absent EEPROM never blocks anything.
 
 ## Hardware
 
 WeAct Black Pill V3.0 (**STM32F411CE**), Arduino framework on PlatformIO.
 
 Shared OS-layer pins (spec §1.2): OLED on I2C1 (PB6/PB7), buttons UP/DOWN/
-SELECT/BACK on PB12–PB15, START/STOP on PA0, buzzer PA1, status LEDs PB8/PB9,
-battery sense PB0. The authoritative table lives in
+SELECT/BACK on PB12–PB15, START/STOP on PA0, buzzer PA1, one WS2812 status
+LED on PB8. Battery/power (INA219) and the profile-store mirror (24LC256
+EEPROM) share the same I2C bus — no dedicated pins at all. That consolidation
+frees PB9 and PB0 for project-specific use. The authoritative table lives in
 [`shared/LanzonesOS/src/LzPins.h`](shared/LanzonesOS/src/LzPins.h).
 
-> ⚠️ **Project-specific pins are placeholders.** Motors, encoders, mux selects,
-> expander address/INT, and the battery divider live in each project's
-> `include/pin_config.h`, clearly marked `NOT FINAL` until the custom PCB
-> layout lands. Update one file per project — no logic changes needed.
+A debug-fallback header breaks out SWD (PA13/PA14) alongside a small
+expansion header for whatever comes up later — both already-reserved or
+free pins, so neither costs anything.
+
+> ⚠️ **Project-specific pins are placeholders.** Motors, encoders, mux/
+> expander selects and addresses, and I2C peripheral addresses (INA219,
+> EEPROM, expanders) live in each project's `include/pin_config.h`, clearly
+> marked `NOT FINAL` until the custom PCB layout lands. Update one file per
+> project — no logic changes needed.
 
 ## Build & upload
 
@@ -154,8 +176,9 @@ lanzones-robotics-os/
 ├── VECTOR/                 # Line Follower OS (PlatformIO project)
 │   ├── include/
 │   └── src/                #   engine, screens, path editor, help
-└── shared/LanzonesOS/      # Shared OS layer (UI, input, storage, watchdog,
-                            #   buzzer, battery, motors, serial transfer, logos)
+└── shared/LanzonesOS/      # Shared OS layer (UI, input, flash+EEPROM store,
+                            #   watchdog, buzzer, RGB LED, INA219 battery,
+                            #   motors, serial transfer, logos)
 ```
 
 ## License & authorship
