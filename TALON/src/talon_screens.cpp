@@ -277,20 +277,28 @@ static void openEdgeCheck() { OS.push(&edgeCheck); }
 static void openTofZero() {
   if (OS.editAllowed()) OS.push(&tofZero);
 }
-// Edge Polarity (spec Edge Calibration): matches the module's output sense.
-static const char *const EDGE_POL_NAMES[2] = {"Active-High", "Active-Low"};
+// Polarity settings (spec Edge Calibration, extended this pass to the bump
+// switch): matches whichever module/switch's output sense is wired in.
+static const char *const POLARITY_NAMES[2] = {"Active-High", "Active-Low"};
 static void editEdgePolarity() {
-  EnumEditor.open("Edge polarity", EDGE_POL_NAMES, 2, &G.cur.edgePolarity);
+  EnumEditor.open("Edge polarity", POLARITY_NAMES, 2, &G.cur.edgePolarity);
 }
 static void vEdgePol(char *o, size_t n) {
   snprintf(o, n, "%s", G.cur.edgePolarity ? "Act-LO" : "Act-HI");
 }
+static void editBumpPolarity() {
+  EnumEditor.open("Bump polarity", POLARITY_NAMES, 2, &G.cur.bumpPolarity);
+}
+static void vBumpPol(char *o, size_t n) {
+  snprintf(o, n, "%s", G.cur.bumpPolarity ? "Act-LO" : "Act-HI");
+}
 static const LzMenuItem CAL_ITEMS[] = {
     {"Edge Sensor Check", openEdgeCheck, nullptr},
     {"Edge Polarity", editEdgePolarity, vEdgePol},
+    {"Bump Polarity", editBumpPolarity, vBumpPol},
     {"ToF Zero Reference", openTofZero, nullptr},
 };
-static LzMenuScreen calMenu("CALIB", CAL_ITEMS, 3);
+static LzMenuScreen calMenu("CALIB", CAL_ITEMS, 4);
 void openCalibrate() { OS.push(&calMenu); }
 
 // ---------------- MOTOR TEST ----------------

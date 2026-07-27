@@ -57,11 +57,15 @@ void LzLeds::begin() {
   pixel_.show();             // off
 }
 
-// resolves the priority-ordered state into an RGB color for `now`
+// Resolves the priority-ordered state into an RGB color for `now`.
+// forceSolid collapses any blinking state to its ON color — used for the
+// single deterministic write when freezing begins, so the LED doesn't
+// land on an arbitrary blink phase for the whole frozen window.
 static uint32_t resolveColor(Adafruit_NeoPixel &px, LzLedState state,
-                            bool locked, bool lowBatt, uint32_t now) {
-  bool fastBlink = (now / 120) & 1;
-  bool slowBlink = (now / 400) & 1;
+                            bool locked, bool lowBatt, uint32_t now,
+                            bool forceSolid) {
+  bool fastBlink = forceSolid || ((now / 120) & 1);
+  bool slowBlink = forceSolid || ((now / 400) & 1);
   if (lowBatt) return fastBlink ? px.Color(255, 0, 0) : 0;       // top priority
   if (state == LZLED_FAULT) return fastBlink ? px.Color(255, 0, 0) : 0;
   if (locked) return px.Color(0, 0, 255);                        // solid blue
@@ -73,8 +77,22 @@ static uint32_t resolveColor(Adafruit_NeoPixel &px, LzLedState state,
   }
 }
 
+void LzLeds::setFrozen(bool f) {
+  if (f == frozen_) return;
+  frozen_ = f;
+  if (!frozen_) return;  // unfreezing: next tick() resumes normal updates
+  // One last deliberate write before going silent for the whole RUN MODE
+  // window (see header comment) — deterministic, not blink-phase-dependent.
+  uint32_t c = resolveColor(pixel_, state_, locked_, lowBatt_, 0, true);
+  if (c == lastColor_) return;
+  lastColor_ = c;
+  pixel_.setPixelColor(0, c);
+  pixel_.show();
+}
+
 void LzLeds::tick(uint32_t now) {
-  uint32_t c = resolveColor(pixel_, state_, locked_, lowBatt_, now);
+  if (frozen_) return;  // no transitions during RUN MODE (interrupt safety)
+  uint32_t c = resolveColor(pixel_, state_, locked_, lowBatt_, now, false);
   if (c == lastColor_) return;  // change-driven: skip the bit-bang write
   lastColor_ = c;
   pixel_.setPixelColor(0, c);

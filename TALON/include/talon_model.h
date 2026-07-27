@@ -112,6 +112,10 @@ struct TalonTuning {
   // Edge module polarity (spec: Edge Calibration): 0 = Active-High
   // (module output HIGH on the white boundary), 1 = Active-Low.
   uint8_t edgePolarity = 0;
+  // Bump switch polarity, same convention (this pass): 0 = Active-High,
+  // 1 = Active-Low. Default matches the wiring assumed before this
+  // setting existed (a normally-open switch shorting to GND on contact).
+  uint8_t bumpPolarity = 1;
 };
 
 #define TALON_MAX_PROFILES 5
@@ -128,7 +132,7 @@ struct TalonStore {
   TalonProfile profiles[TALON_MAX_PROFILES];
   Strategy strategies[TALON_MAX_STRATEGIES];
 };
-#define TALON_STORE_VERSION 3  // v3: edge polarity; older images load as defaults
+#define TALON_STORE_VERSION 4  // v4: bump polarity; older images load as defaults
 
 extern TalonStore G;
 

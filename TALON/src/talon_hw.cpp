@@ -97,6 +97,14 @@ static bool expander2Read(uint8_t &val) {
 // physical flick can never change the active strategy mid-match. Raw bits
 // are read as the position value as-is; adjust the decode once the actual
 // switch part (DIP vs. rotary, active-high vs. active-low) is chosen.
+//
+// Gated behind Lock Config (team decision, overturns the original "treat
+// it like Quick Rematch" call): unlike Quick Rematch, which only resets
+// run state, this changes which strategy actually FIGHTS — exactly what
+// Lock Config exists to freeze. While locked, a new stable switch position
+// is ignored outright (not queued — moving the switch again after
+// unlocking is required) and reported on-screen once per change attempt,
+// not on every poll.
 static void stratSwitchTick(uint32_t now) {
   if (!expander2Ok) return;
   RunState rs = runState();
@@ -112,7 +120,12 @@ static void stratSwitchTick(uint32_t now) {
     candidate = pos;
     candT0 = now;
   } else if (now - candT0 >= 50 && pos != stable) {  // 50 ms debounce
-    stable = pos;
+    stable = pos;  // absorbed either way — no deferred/queued apply on unlock
+    if (OS.locked()) {
+      Buzzer.play(SND_ERROR);
+      Message.show("Locked - switch", "has no effect");
+      return;
+    }
     uint8_t n = 0;
     for (uint8_t i = 0; i < TALON_MAX_STRATEGIES; i++) {
       if (!G.strategies[i].used) continue;
@@ -221,11 +234,10 @@ static void sensorsUpdate(uint32_t now) {
       // Edge Polarity setting (spec Edge Calibration): 0=Active-High
       edgeL = G.cur.edgePolarity ? !rawL : rawL;
       edgeR = G.cur.edgePolarity ? !rawR : rawR;
-      // Bump/contact microswitch (this pass, P7): assumed a normally-open
-      // switch shorting to GND on contact (active-low) — no separate
-      // polarity setting exists for this yet; flip here if the physical
-      // switch is wired the other way.
-      bumpContact = (v & (1 << 7)) == 0;
+      // Bump/contact microswitch (P7) — Bump Polarity setting, same
+      // convention as edges: 0=Active-High, 1=Active-Low.
+      bool rawBump = (v & (1 << 7)) != 0;
+      bumpContact = G.cur.bumpPolarity ? !rawBump : rawBump;
     }
   }
   imuUpdate(now);

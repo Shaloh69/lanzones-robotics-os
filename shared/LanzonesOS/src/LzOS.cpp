@@ -119,6 +119,7 @@ void LzOS::setLocked(bool l) {
 
 void LzOS::setRunActive(bool a) {
   lzStoreRunGuard = a;  // spec 6.1: no flash writes during RUN MODE
+  Leds.setFrozen(a);    // no WS2812 writes during RUN MODE either (this pass)
 }
 
 bool LzOS::runActive() const { return lzStoreRunGuard; }

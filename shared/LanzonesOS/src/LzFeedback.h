@@ -50,6 +50,14 @@ class LzLeds {
   void setState(LzLedState s) { state_ = s; }
   void setLocked(bool l) { locked_ = l; }        // overlay: solid blue
   void setLowBattery(bool low) { lowBatt_ = low; }  // overlay: pulsing red, top priority
+  // Freeze all color transitions (spec, this pass): while frozen, tick()
+  // never calls .show() — the WS2812 bit-bang briefly disables interrupts,
+  // and that must never happen during the 200Hz control ISR's window
+  // (RUN MODE, tied 1:1 to OS::setRunActive). One deterministic, non-
+  // blinking write happens at the moment freezing STARTS so the LED
+  // doesn't land on an arbitrary blink phase for the whole match; nothing
+  // else is written until unfrozen. Outside RUN MODE, unrestricted.
+  void setFrozen(bool f);
   void tick(uint32_t now);
 
  private:
@@ -57,6 +65,7 @@ class LzLeds {
   LzLedState state_ = LZLED_READY;
   bool locked_ = false;
   bool lowBatt_ = false;
+  bool frozen_ = false;
   uint32_t lastColor_ = 0xFFFFFFFF;  // change-driven: only push() when it differs
 };
 

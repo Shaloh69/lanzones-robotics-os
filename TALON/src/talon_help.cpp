@@ -113,15 +113,16 @@ static const LzHelpEntry HELP[] = {
      "no\nmenu backtracking\nbetween bouts."},
     {"Bump Sensor",
      "The front bumper\nmicroswitch\nconfirms actual\nphysical contact,\n"
-     "not just nearby\nproximity like the\nToF sensors.\nExample: set a "
-     "Ram\nphase's trigger to\nContact instead of\nOpponent so it\ncommits "
-     "until it\ntruly connects,\nnot just gets\nclose."},
+     "not just nearby\nproximity like the\nToF sensors. If it\nreads "
+     "backwards,\nflip Bump Polarity\nin CALIBRATE.\nExample: set a Ram\n"
+     "phase's trigger to\nContact instead of\nOpponent so it\ncommits "
+     "until it\ntruly connects."},
     {"Strategy Switch",
      "A physical DIP or\nrotary switch lets\nyou pick a saved\nstrategy by "
      "flipping\na switch instead\nof the OLED menu -\nhandy for quick\n"
      "swaps between\nbouts. It only\ntakes effect while\nidle or after a\n"
-     "match - never\nmid-fight - and\nonly changes which\nsaved strategy "
-     "runs\nnext, not its\nsettings."},
+     "match - never\nmid-fight. Lock\nConfig blocks it\ntoo - it changes "
+     "what\nfights, exactly what\nLock Config exists\nto freeze."},
     {"Config Exp/Import",
      "Copies a tuned\nsetup to another\nboard over serial\n(PA9/PA10, "
      "115200)\ninstead of\nre-tuning. Example:\nexport vs_HeavyBot\nfrom "
