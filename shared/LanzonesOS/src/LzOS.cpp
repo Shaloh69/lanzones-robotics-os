@@ -5,6 +5,7 @@
 
 #include "LzStore.h"
 #include "LzUi.h"
+#include "LzVirtualInput.h"
 
 LzOS OS;
 LzButtons Buttons;
@@ -16,7 +17,9 @@ LzBattery Battery;
 void LzOS::begin(const char *name, const char *bid) {
   osName = name;
   buildId = bid;
-  Serial.begin(115200);  // USART1 PA9/PA10: debug + config export/import
+  Serial.begin(115200);  // USB-CDC (or USART1 PA9/PA10): debug + config
+                         // export/import; see platformio.ini's CDC note
+  LzVirtualInput::begin();  // menu-testing input with no buttons wired
   Buttons.begin();
   Display.begin();
   Buzzer.begin();
@@ -57,7 +60,7 @@ void LzOS::showSplash(const uint8_t *logo64) {
   if (logo64) g.drawBitmap(32, 0, 8, 64, logo64);
   g.sendBuffer();
   fadeTo(g, 0, 255);   // fade in
-  splashWait(600);     // hold
+  splashWait(3000);    // hold ~3s
   fadeTo(g, 255, 0);   // fade out toward the text frame
 
   // Frame 2: OS name (large) + firmware version + "LANZONES x KOOGS"
@@ -127,6 +130,7 @@ bool LzOS::runActive() const { return lzStoreRunGuard; }
 void LzOS::tick() {
   uint32_t now = millis();
   IWatchdog.reload();  // fed every loop — watchdog trips only on a real hang
+  LzVirtualInput::tick(now);  // feeds virtual taps before poll() reads them
   Buttons.poll(now);
 
   LzEvent ev;

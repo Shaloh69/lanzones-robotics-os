@@ -10,6 +10,16 @@ void LzButtons::begin() {
   for (uint8_t i = 0; i < BTN_COUNT; i++) pinMode(PIN_OF[i], INPUT_PULLUP);
 }
 
+void LzButtons::virtualTap(LzBtn b) {
+  if (b >= BTN_COUNT) return;  // bounds check
+  virtualUntil_[b] = millis() + 80;  // clears debounce, registers one press
+}
+
+void LzButtons::virtualHold(LzBtn b) {
+  if (b >= BTN_COUNT) return;
+  virtualUntil_[b] = millis() + (LZ_HOLD_MS + 200);  // outlasts the hold gesture
+}
+
 void LzButtons::push(LzBtn b, LzEvType t) {
   uint8_t nextTail = (uint8_t)((qTail_ + 1) % QLEN);
   if (nextTail == qHead_) return;  // queue full: drop (bounds-safe)
@@ -26,7 +36,9 @@ bool LzButtons::next(LzEvent &ev) {
 
 void LzButtons::poll(uint32_t now) {
   for (uint8_t i = 0; i < BTN_COUNT; i++) {
-    bool r = (digitalRead(PIN_OF[i]) == LOW);  // active low, pull-up
+    bool virtualHeld = virtualUntil_[i] != 0 && (int32_t)(now - virtualUntil_[i]) < 0;
+    if (virtualUntil_[i] != 0 && !virtualHeld) virtualUntil_[i] = 0;  // expired
+    bool r = (digitalRead(PIN_OF[i]) == LOW) || virtualHeld;  // active low, pull-up
     if (r != raw_[i]) {
       raw_[i] = r;
       lastEdge_[i] = now;
